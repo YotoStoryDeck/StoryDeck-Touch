@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "default_device": "waveshare-s3-43b",
+  "devices": {
+    "waveshare-s3-43b": {
+      "name": "Waveshare 4.3\" ESP32-S3 Touch (LCD-4.3B)",
+      "chip_family": "ESP32-S3",
+      "latest_stable": null,
+      "latest_prerelease": null,
+      "releases": []
+    }
+  }
+}

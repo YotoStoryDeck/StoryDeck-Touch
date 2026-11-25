@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StoryDeck Touch — Web Installer</title>
+  <meta name="description" content="Install StoryDeck Touch firmware onto your Waveshare ESP32-S3-Touch-LCD-4.3B directly from your browser using Web Serial.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20%22100%22%20%22100%22><text y=%22.9em%22 font-size=%2290%22>📻</text></svg>">
+  
+  <!-- ESP Web Tools Web Component (v10) -->
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+
+  <style>
+    :root {
+      --bg-cream: #FBF7F0;
+      --bg-card: #FFFFFF;
+      --text-main: #1E293B;
+      --text-muted: #64748B;
+      --border: #E2E8F0;
+      --primary: #FF5A36;
+      --primary-hover: #E04826;
+      --primary-light: #FFF1EE;
+      --blue-accent: #0284C7;
+      --green-success: #16A34A;
+      --amber-warn: #D97706;
+      --radius-lg: 16px;
+      --radius-md: 10px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-cream);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      padding: 32px 16px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 760px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary-light);
+      color: var(--primary);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 580px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      box-shadow: var(--shadow-md);
+      margin-bottom: 24px;
+    }
+
+    /* Channel Selector Tabs */
+    .channel-selector-wrapper {
+      margin-bottom: 20px;
+    }
+
+    .channel-tabs {
+      display: flex;
+      background: #F1F5F9;
+      padding: 4px;
+      border-radius: 12px;
+      gap: 4px;
+    }
+
+    .channel-tab {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .channel-tab.active {
+      background: #FFFFFF;
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .channel-tab:hover:not(.active) {
+      color: var(--text-main);
+    }
+
+    /* Active Version Banner */
+    .version-banner {
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .version-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .version-tag {
+      font-family: monospace;
+      font-size: 14px;
+      font-weight: 700;
+      background: #E2E8F0;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    .status-badge {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 9999px;
+    }
+
+    .status-badge.prerelease {
+      background: #FEF3C7;
+      color: var(--amber-warn);
+    }
+
+    .status-badge.stable {
+      background: #DCFCE7;
+      color: var(--green-success);
+    }
+
+    .release-link {
+      font-size: 13px;
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .release-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Flasher Action Box */
+    .flash-box {
+      text-align: center;
+      padding: 36px 20px;
+      background: #FAFAFA;
+      border: 2px dashed #CBD5E1;
+      border-radius: var(--radius-md);
+      margin-bottom: 28px;
+    }
+
+    .flash-box-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    .flash-box h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .flash-box p {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    /* Customizing the ESP Web Tools Button */
+    esp-web-install-button {
+      display: inline-block;
+    }
+
+    .btn-install {
+      background: var(--primary);
+      color: #FFFFFF;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 14px 28px;
+      border-radius: 9999px;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(255, 90, 54, 0.35);
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-install:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(255, 90, 54, 0.45);
+    }
+
+    .btn-install:active {
+      transform: translateY(0);
+    }
+
+    .unsupported-note {
+      color: #DC2626;
+      background: #FEF2F2;
+      border: 1px solid #FCA5A5;
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 500;
+      margin-top: 16px;
+      display: inline-block;
+    }
+
+    /* Stepper List */
+    .steps-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stepper {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .step-number {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--primary-light);
+      color: var(--primary);
+      font-weight: 700;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-content strong {
+      display: block;
+      font-size: 15px;
+      color: var(--text-main);
+      margin-bottom: 2px;
+    }
+
+    .step-content p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Hardware Specs Matrix */
+    .specs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .spec-item {
+      background: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+    }
+
+    .spec-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.03em;
+    }
+
+    .spec-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-top: 2px;
+    }
+
+    /* Accordion / Troubleshooting */
+    details {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      margin-bottom: 10px;
+      background: #FFFFFF;
+      overflow: hidden;
+    }
+
+    summary {
+      padding: 14px 18px;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      user-select: none;
+      background: #F8FAFC;
+      transition: background 0.15s ease;
+    }
+
+    summary:hover {
+      background: #F1F5F9;
+    }
+
+    .details-body {
+      padding: 16px 18px;
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      border-top: 1px solid var(--border);
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 40px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    footer a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    .links-bar {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="brand-badge">✨ Official StoryDeck Web Installer</div>
+      <h1>StoryDeck Touch Installer</h1>
+      <p class="subtitle">Flash the latest bedside touchscreen firmware onto your hardware directly from your browser using Web Serial.</p>
+    </header>
+
+    <!-- Main Flashing Card -->
+    <div class="card">
+      
+      <!-- Future-Proof Multi-Device Target Selector (Auto-hidden if only 1 device configured) -->
+      <div id="device-selector-wrapper" class="device-selector-wrapper" style="display: none; margin-bottom: 18px;">
+        <label for="device-select" style="display: block; font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+          Select Hardware Model:
+        </label>
+        <select id="device-select" onchange="setDevice(this.value)" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; font-weight: 600; background: #FFFFFF; color: var(--text-main); cursor: pointer;">
+          <!-- Populated dynamically via releases.json -->
+        </select>
+      </div>
+
+      <!-- Release Channel Selector -->
+      <div class="channel-selector-wrapper">
+        <label style="display: block; font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">
+          Select Release Channel:
+        </label>
+        <div class="channel-tabs">
+          <button id="tab-stable" class="channel-tab active" onclick="setChannel('stable')">
+            <span>🟢</span> Stable Release
+          </button>
+          <button id="tab-prerelease" class="channel-tab" onclick="setChannel('prerelease')">
+            <span>🧪</span> Pre-Release / Beta
+          </button>
+        </div>
+      </div>
+
+      <!-- Version Information Banner & Selector -->
+      <div class="version-banner">
+        <div class="version-info" style="width: 100%; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <label for="version-select" style="font-size: 14px; font-weight: 700;">Release Version:</label>
+            <select id="version-select" onchange="onVersionSelected(this.value)" style="padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); font-family: monospace; font-size: 14px; font-weight: 700; background: #FFFFFF; color: var(--text-main); cursor: pointer;">
+              <!-- Populated dynamically -->
+            </select>
+            <span id="channel-badge" class="status-badge stable">Stable Release</span>
+          </div>
+          <div>
+            <a id="release-link" class="release-link" href="https://github.com/YotoStoryDeck/StoryDeck-Touch/releases" target="_blank">View Release Notes ↗</a>
+          </div>
+        </div>
+        <div id="channel-desc" style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">
+          Latest validated build for daily bedside use
+        </div>
+      </div>
+
+      <div class="flash-box">
+        <div class="flash-box-icon">📟</div>
+        <h3>Ready to Install Firmware</h3>
+        <p id="flash-instructions">Connect your Waveshare 4.3" ESP32-S3 board to your PC via USB-C to begin.</p>
+
+        <!-- Dynamic Container for ESP Web Tools install element -->
+        <div id="flasher-container">
+          <esp-web-install-button manifest="manifest-stable.json">
+            <button slot="activate" class="btn-install">
+              <span>⚡</span> Connect & Install StoryDeck Touch
+            </button>
+            <div slot="unsupported" class="unsupported-note">
+              ⚠️ <strong>Web Serial Not Supported:</strong> Please open this web page in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a desktop computer (Windows, macOS, or Linux).
+            </div>
+          </esp-web-install-button>
+        </div>
+      </div>
+
+      <div class="steps-title">
+        <span>📋</span> Quick Setup Guide
+      </div>
+
+      <ul class="stepper">
+        <li class="step-item">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <strong>Connect USB-C Cable</strong>
+            <p>Plug a USB-C data cable between your computer and the Waveshare ESP32-S3 board. Ensure the cable supports data transfer (not charge-only).</p>
+          </div>
+        </li>
+        <li class="step-item">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <strong>Open in Chrome or Edge</strong>
+            <p>Click the orange <strong>Connect & Install</strong> button above and grant serial port permission when prompted.</p>
+          </div>
+        </li>
+        <li class="step-item">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <strong>Confirm Erase & Flash</strong>
+            <p>Select <em>Erase device</em> and click <em>Next</em>. The browser will flash the bootloader, partition table, and firmware in under 60 seconds.</p>
+          </div>
+        </li>
+        <li class="step-item">
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <strong>First Boot & Wi-Fi Pairing</strong>
+            <p>When flashing finishes, the 800×480 screen will light up. Join Wi-Fi <em>"StoryDeck-Setup"</em> to pair with StoryDeck Core or Standalone Cloud.</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Supported Hardware Card -->
+    <div class="card">
+      <div class="steps-title">
+        <span>🛠️</span> Supported Hardware
+      </div>
+      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 12px;">
+        StoryDeck Touch is engineered specifically for the following development board and display subsystem:
+      </p>
+
+      <div class="specs-grid">
+        <div class="spec-item">
+          <div class="spec-label">Target Hardware</div>
+          <div class="spec-val">Waveshare ESP32-S3-Touch-LCD-4.3B (Rev 1.1)</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Microcontroller</div>
+          <div class="spec-val">ESP32-S3-WROOM-1 (16MB Flash / 8MB PSRAM)</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Display Subsystem</div>
+          <div class="spec-val">4.3" IPS LCD (800×480 @ 16 MHz RGB Parallel)</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Touch Controller</div>
+          <div class="spec-val">Goodix GT911 Capacitive Multi-Touch</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">MicroSD Slot</div>
+          <div class="spec-val">FAT32 Persistent Artwork & Chapter Cache</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Bedside Enclosure</div>
+          <div class="spec-val">Open-source 3D printable desktop stand</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Troubleshooting Accordion -->
+    <div class="card">
+      <div class="steps-title">
+        <span>❓</span> Troubleshooting & Tips
+      </div>
+
+      <details>
+        <summary>No Serial Port Detected / Board Not Showing in Chrome</summary>
+        <div class="details-body">
+          <ol style="padding-left: 20px;">
+            <li><strong>Force ROM Bootloader:</strong> Unplug the board. Hold down the physical <strong>BOOT</strong> button on the back of the Waveshare PCB, plug the USB-C cable in, and release the BOOT button.</li>
+            <li><strong>Check Your Cable:</strong> Many USB cables bundled with toys or vape chargers are power-only. Test with a known data cable (e.g. phone sync cable).</li>
+            <li><strong>Driver Check (Windows):</strong> If Windows shows <em>Unknown Device</em>, install the standard <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers" target="_blank">CP210x or CH34x driver</a> or Espressif USB JTAG driver.</li>
+          </ol>
+        </div>
+      </details>
+
+      <details>
+        <summary>Linux / Ubuntu: Permission Denied on /dev/ttyACM0</summary>
+        <div class="details-body">
+          On Linux, your user account must belong to the dialout group to access serial ports:
+          <pre style="background: #F1F5F9; padding: 10px; border-radius: 6px; margin: 8px 0; font-family: monospace;">sudo usermod -a -G dialout $USER</pre>
+          Log out and back in, then refresh this page.
+        </div>
+      </details>
+
+      <details>
+        <summary>MicroSD Card Compatibility & Formatting</summary>
+        <div class="details-body">
+          MicroSD cards must be formatted as <strong>FAT32</strong> (exFAT is not supported by the ESP32 SPI driver). For cards 64GB or larger, format with <em>GUIFormat</em> or <em>Rufus</em> selecting Large FAT32 with 32KB cluster size.
+        </div>
+      </details>
+
+      <details>
+        <summary>Can I Flash Manually via PlatformIO or CLI?</summary>
+        <div class="details-body">
+          Yes! Clone the repository and compile using PlatformIO:
+          <pre style="background: #F1F5F9; padding: 10px; border-radius: 6px; margin: 8px 0; font-family: monospace;">git clone https://github.com/YotoStoryDeck/StoryDeck-Touch.git
+cd touch
+pio run -e waveshare-s3-43b -t upload</pre>
+        </div>
+      </details>
+    </div>
+
+    <footer>
+      <p>StoryDeck Touch is open-source hardware & software for children's audio players.</p>
+      <div class="links-bar">
+        <a href="https://github.com/YotoStoryDeck/StoryDeck-Touch" target="_blank">GitHub Repository</a>
+        <span>•</span>
+        <a href="https://github.com/YotoStoryDeck/StoryDeck-Core" target="_blank">StoryDeck Core Hub</a>
+        <span>•</span>
+        <a href="https://github.com/YotoStoryDeck/StoryDeck-Touch/wiki" target="_blank">Documentation Wiki</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    let currentChannel = 'stable';
+    let currentDevice = 'waveshare-s3-43b';
+    let releasesData = null;
+    let currentManifest = 'manifest-stable.json';
+
+    async function fetchReleasesIndex() {
+      try {
+        const resp = await fetch('releases.json?t=' + Date.now());
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.devices) return data;
+        }
+      } catch (err) {
+        console.warn('Could not load releases.json, using fallback manifests', err);
+      }
+      return null;
+    }
+
+    async function initChannels() {
+      releasesData = await fetchReleasesIndex();
+
+      if (releasesData && releasesData.devices) {
+        const deviceKeys = Object.keys(releasesData.devices);
+        currentDevice = releasesData.default_device || deviceKeys[0] || 'waveshare-s3-43b';
+
+        // Show device selector only if >1 device exists
+        const devWrapper = document.getElementById('device-selector-wrapper');
+        const devSelect = document.getElementById('device-select');
+        if (devWrapper && devSelect) {
+          if (deviceKeys.length > 1) {
+            devWrapper.style.display = 'block';
+            devSelect.innerHTML = deviceKeys.map(k => {
+              const d = releasesData.devices[k];
+              const selected = k === currentDevice ? 'selected' : '';
+              return `<option value="${k}" ${selected}>${d.name || k}</option>`;
+            }).join('');
+          } else {
+            devWrapper.style.display = 'none';
+          }
+        }
+      }
+
+      updateUI();
+    }
+
+    function setDevice(deviceId) {
+      currentDevice = deviceId;
+      updateUI();
+    }
+
+    function setChannel(channel) {
+      currentChannel = channel;
+      updateUI();
+    }
+
+    function onVersionSelected(version) {
+      const dev = releasesData && releasesData.devices ? releasesData.devices[currentDevice] : null;
+      const releases = dev && Array.isArray(dev.releases) ? dev.releases : [];
+      const rel = releases.find(r => r.version === version);
+
+      if (rel && rel.manifest) {
+        currentManifest = rel.manifest;
+      } else {
+        currentManifest = currentChannel === 'stable' ? 'manifest-stable.json' : 'manifest-prerelease.json';
+      }
+
+      const releaseLink = document.getElementById('release-link');
+      if (releaseLink) {
+        releaseLink.href = 'https://github.com/YotoStoryDeck/StoryDeck-Touch/releases/tag/' + encodeURIComponent(version);
+      }
+
+      renderFlasherButton(currentManifest, version);
+    }
+
+    function updateUI() {
+      const tabPrerelease = document.getElementById('tab-prerelease');
+      const tabStable = document.getElementById('tab-stable');
+      const versionSelect = document.getElementById('version-select');
+      const channelBadge = document.getElementById('channel-badge');
+      const channelDesc = document.getElementById('channel-desc');
+      const releaseLink = document.getElementById('release-link');
+
+      // Update Channel Tabs
+      if (currentChannel === 'stable') {
+        tabStable.classList.add('active');
+        tabPrerelease.classList.remove('active');
+        channelBadge.textContent = 'Stable Release';
+        channelBadge.className = 'status-badge stable';
+        channelDesc.textContent = 'Latest validated build for daily bedside use';
+      } else {
+        tabPrerelease.classList.add('active');
+        tabStable.classList.remove('active');
+        channelBadge.textContent = 'Pre-Release';
+        channelBadge.className = 'status-badge prerelease';
+        channelDesc.textContent = 'Latest release candidate build (active development)';
+      }
+
+      // Populate Version Dropdown
+      const dev = releasesData && releasesData.devices ? releasesData.devices[currentDevice] : null;
+      const allReleases = dev && Array.isArray(dev.releases) ? dev.releases : [];
+      const channelReleases = allReleases.filter(r => r.channel === currentChannel);
+
+      if (channelReleases.length > 0) {
+        versionSelect.innerHTML = channelReleases.map((r, idx) => {
+          let label = r.version;
+          if (idx === 0) {
+            label += currentChannel === 'stable' ? ' — ★ Latest Stable' : ' — 🧪 Latest RC';
+          }
+          return `<option value="${r.version}">${label}</option>`;
+        }).join('');
+
+        const activeVersion = channelReleases[0].version;
+        versionSelect.value = activeVersion;
+        currentManifest = channelReleases[0].manifest || (currentChannel === 'stable' ? 'manifest-stable.json' : 'manifest-prerelease.json');
+        if (releaseLink) {
+          releaseLink.href = 'https://github.com/YotoStoryDeck/StoryDeck-Touch/releases/tag/' + encodeURIComponent(activeVersion);
+        }
+        renderFlasherButton(currentManifest, activeVersion);
+      } else {
+        // Fallback if no releases in json
+        const fallbackVer = currentChannel === 'stable' ? 'v0.1.0' : 'v0.1.0-rc.20261103.1';
+        versionSelect.innerHTML = `<option value="${fallbackVer}">${fallbackVer} (Default)</option>`;
+        currentManifest = currentChannel === 'stable' ? 'manifest-stable.json' : 'manifest-prerelease.json';
+        if (releaseLink) {
+          releaseLink.href = 'https://github.com/YotoStoryDeck/StoryDeck-Touch/releases';
+        }
+        renderFlasherButton(currentManifest, fallbackVer);
+      }
+    }
+
+    function renderFlasherButton(manifestPath, version) {
+      const container = document.getElementById('flasher-container');
+      if (!container) return;
+      container.innerHTML = `
+        <esp-web-install-button manifest="${manifestPath}?t=${Date.now()}">
+          <button slot="activate" class="btn-install">
+            <span>⚡</span> Connect & Install StoryDeck Touch (${version})
+          </button>
+          <div slot="unsupported" class="unsupported-note">
+            ⚠️ <strong>Web Serial Not Supported:</strong> Please use Google Chrome or Microsoft Edge on a desktop computer.
+          </div>
+        </esp-web-install-button>
+      `;
+    }
+
+    // Initialize on page load
+    window.addEventListener('DOMContentLoaded', initChannels);
+  </script>
+
+</body>
+</html>
