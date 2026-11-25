@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "author": "StoryDeck Touch",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {
+        "flashSize": "16",
+        "psramSize": "8",
+        "psramType": "octal"
+      }
+    },
+    {
+      "type": "board-ili9341-cap-touch",
+      "id": "lcd1",
+      "top": -40,
+      "left": 150,
+      "rotate": 90,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-microsd-card",
+      "id": "sd1",
+      "top": 220,
+      "left": 180,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [ "esp:GND.1", "lcd1:GND", "black", [ "h0" ] ],
+    [ "esp:3V3.1", "lcd1:VCC", "red", [ "h0" ] ],
+    [ "esp:15", "lcd1:CS", "orange", [ "h0" ] ],
+    [ "esp:4", "lcd1:RST", "blue", [ "h0" ] ],
+    [ "esp:2", "lcd1:D/C", "purple", [ "h0" ] ],
+    [ "esp:11", "lcd1:MOSI", "green", [ "h0" ] ],
+    [ "esp:12", "lcd1:SCK", "yellow", [ "h0" ] ],
+    [ "esp:13", "lcd1:MISO", "cyan", [ "h0" ] ],
+    [ "esp:3V3.1", "lcd1:LED", "red", [ "h0" ] ],
+    [ "esp:8", "lcd1:SDA", "magenta", [ "h0" ] ],
+    [ "esp:9", "lcd1:SCL", "white", [ "h0" ] ],
+    [ "sd1:GND", "esp:GND.2", "black", [ "h0" ] ],
+    [ "sd1:VCC", "esp:3V3.1", "red", [ "h0" ] ],
+    [ "sd1:CS", "esp:6", "purple", [ "h0" ] ],
+    [ "sd1:DI", "esp:16", "green", [ "h0" ] ],
+    [ "sd1:DO", "esp:17", "cyan", [ "h0" ] ],
+    [ "sd1:SCK", "esp:18", "yellow", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,17 @@
+[wokwi]
+version = 1
+firmware = ".pio/build/wokwi/firmware.factory.bin"
+elf = ".pio/build/wokwi/firmware.elf"
+
+# Configure the virtual MicroSD card (sdcard/ythumbs/ holds ~7 MB of pre-cached RGB565 covers & avatars).
+[[sdcard]]
+folder = "sdcard"
+size = "32M"
+writeback = true
+
+# Forward localhost:8180 on your PC to port 80 on the simulated ESP32-S3:
+# - http://localhost:8180/screen   -> True 1:1 800x480 interactive LVGL framebuffer mirror
+# - http://localhost:8180/settings -> Device Web Settings portal
+[[net.forward]]
+from = "localhost:8180"
+to = "target:80"

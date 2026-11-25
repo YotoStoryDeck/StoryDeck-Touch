@@ -1,0 +1,152 @@
+name: Release & Pre-Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semantic Version Action'
+        required: true
+        type: choice
+        options:
+          - 'current'
+          - 'patch'
+          - 'minor'
+          - 'major'
+          - 'custom'
+        default: 'current'
+      release_type:
+        description: 'Release Classification'
+        required: true
+        type: choice
+        options:
+          - 'pre-release (RC)'
+          - 'stable (Full Release)'
+        default: 'pre-release (RC)'
+      custom_tag:
+        description: 'Custom Tag (only evaluated if bump=custom)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Package Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO Core
+        run: |
+          pip install --upgrade platformio
+
+      - name: Print Build Environment & Checked-Out Ref
+        run: |
+          echo "GITHUB_REF: ${GITHUB_REF}"
+          echo "GITHUB_REF_NAME: ${GITHUB_REF_NAME}"
+          echo "GITHUB_SHA: ${GITHUB_SHA}"
+          echo "=== Touch Git Repository Status ==="
+          git rev-parse HEAD
+          git status
+
+      - name: Determine Tag & Release Classification
+        id: meta
+        run: |
+          git fetch --tags --force
+          python3 .github/scripts/calculate_version.py \
+            --repo-dir . \
+            --event "${{ github.event_name }}" \
+            --ref-name "${GITHUB_REF_NAME}" \
+            --bump "${{ github.event.inputs.bump }}" \
+            --release-type "${{ github.event.inputs.release_type }}" \
+            --custom-tag "${{ github.event.inputs.custom_tag }}"
+
+      - name: Configure Firmware Build Seeds
+        run: |
+          if [ ! -f secrets.h ]; then
+            cp secrets.h.example secrets.h
+          fi
+
+      - name: Build Waveshare ESP32-S3 Firmware
+        env:
+          STORYDECK_VERSION: ${{ steps.meta.outputs.tag }}
+        run: |
+          pio run -e waveshare-s3-43b
+          mkdir -p dist
+          # Copy firmware binaries
+          cp .pio/build/waveshare-s3-43b/firmware.bin dist/storydeck-touch-${{ steps.meta.outputs.tag }}-firmware.bin
+          cp .pio/build/waveshare-s3-43b/bootloader.bin dist/storydeck-touch-${{ steps.meta.outputs.tag }}-bootloader.bin || true
+          cp .pio/build/waveshare-s3-43b/partitions.bin dist/storydeck-touch-${{ steps.meta.outputs.tag }}-partitions.bin || true
+          cp .pio/build/waveshare-s3-43b/firmware.factory.bin dist/storydeck-touch-${{ steps.meta.outputs.tag }}-factory.bin || true
+
+      - name: Generate Changelog & Release Notes
+        id: notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --tags --force
+          python3 .github/scripts/generate_changelog.py \
+            --repo "${{ github.repository }}" \
+            --tag "${{ steps.meta.outputs.tag }}" \
+            --prerelease "${{ steps.meta.outputs.prerelease }}" \
+            --output-file "release_notes.md" \
+            --token "${GITHUB_TOKEN}"
+          echo "Generated release notes:"
+          cat release_notes.md
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.meta.outputs.tag }}
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          draft: false
+          body_path: release_notes.md
+          files: |
+            dist/*
+
+      - name: Sync Binaries & Manifests to Website Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Clone dedicated website branch
+          git clone --branch website https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git website_repo
+
+          TAG="${{ steps.meta.outputs.tag }}"
+          IS_PRERELEASE="${{ steps.meta.outputs.prerelease }}"
+
+          echo "Synchronizing ${TAG} to web flasher with multi-device retention pruning..."
+          python3 .github/scripts/sync_website_flasher.py \
+            --website-dir website_repo \
+            --device-id waveshare-s3-43b \
+            --device-name "Waveshare 4.3\" ESP32-S3 Touch (LCD-4.3B)" \
+            --chip-family "ESP32-S3" \
+            --build-dir .pio/build/waveshare-s3-43b \
+            --tag "${TAG}" \
+            --prerelease "${IS_PRERELEASE}"
+
+          cd website_repo
+          git add bin/ manifests/ releases.json manifest-*.json manifest.json
+          if git diff --staged --quiet; then
+            echo "No changes detected on website branch."
+          else
+            git commit -m "chore(release): auto-publish ${TAG} to web flasher with multi-device retention"
+            git push origin website
+            echo "Successfully synced ${TAG} to website branch."
+          fi
+

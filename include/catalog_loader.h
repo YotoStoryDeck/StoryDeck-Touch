@@ -1,0 +1,759 @@
+void precompute_series_metadata(); // fwd
+#include <algorithm>
+#pragma once
+
+// Catalog Fetching (Core Hub + Standalone Yoto API), Chapter Detail Loader,
+
+// Cover Thumbnail Streaming, and Idle Background Cache Warmer
+
+#include <Arduino.h>
+
+#include <HTTPClient.h>
+
+#include <WiFiClientSecure.h>
+
+#include <ArduinoJson.h>
+
+#include "app_state.h"
+
+#include "storage_sd.h"
+
+#include "cover_decoder.h"
+
+#include "yoto_api.h"
+
+#include "core_api.h"
+#include "standalone_curation.h"
+
+
+
+// Read the full body of an OPEN HTTPClient response into a NUL-terminated PSRAM buffer
+
+// (caller frees). Returns nullptr on alloc failure.
+
+static char* read_body_psram(HTTPClient& http, size_t& outLen){
+
+  outLen = 0;
+
+  int len = http.getSize();
+
+  WiFiClient* stream = http.getStreamPtr();
+
+  size_t cap = (len > 0) ? (size_t)len + 1 : 16384;
+
+  char* buf = (char*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+
+  if(!buf) return nullptr;
+
+  size_t got = 0; uint32_t t0 = millis();
+
+  while(len < 0 || got < (size_t)len){
+
+    size_t avail = stream->available();
+
+    if(avail){
+
+      if(got + avail + 1 > cap){
+
+        size_t ncap = cap * 2;
+
+        char* n = (char*)heap_caps_realloc(buf, ncap, MALLOC_CAP_SPIRAM);
+
+        if(!n) break;
+
+        buf = n; cap = ncap;
+
+      }
+
+      int n = stream->readBytes(buf + got, min(avail, cap - 1 - got));
+
+      if(n > 0){ got += n; t0 = millis(); }
+
+    } else if(!http.connected()){ break; }
+
+    else if(millis() - t0 > 15000){ break; }
+
+    else delay(1);
+
+  }
+
+  buf[got] = '\0';
+
+  outLen = got;
+
+  return buf;
+
+}
+
+
+
+// Add single card from Core catalog (preserving multiple series_list memberships for Kiosk parity; NO LIMIT)
+static void add_core_card(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover = "", const String& s_cover_id = ""){ 
+  Card c;
+  c.id               = id.c_str();
+  c.title            = title.c_str();
+  c.sort_title       = clean_sort_title(title.c_str());
+  c.author           = author.c_str();
+  c.cover            = cover.c_str();
+  c.lp               = lp.c_str();
+  c.source           = (src == "abs") ? 1 : 0;
+  c.series           = series.c_str();
+  c.sequence         = seq;
+  c.seq_display      = seq_disp.c_str();
+  c.has_physical     = has_phys;
+  c.series_cover     = s_cover.c_str();
+  c.series_cover_id  = s_cover_id.c_str();
+  c.extra_series_cnt = 0;
+  if(!series_list.isNull() && series_list.size() > 0){
+    for(size_t si = 0; si < series_list.size(); si++){
+      String sname = (const char*)(series_list[si]["name"] | "");
+      sname.trim();
+      if(sname.length() == 0) continue;
+
+      float s_seq = -1.0f;
+      if(!series_list[si]["sequence"].isNull()){
+        s_seq = (float)series_list[si]["sequence"];
+      }
+      String s_disp = (const char*)(series_list[si]["sequence_display"] | "");
+      s_disp.trim();
+
+      if(sname.equalsIgnoreCase(series) || c.series.length() == 0){
+        if(c.series.length() == 0) c.series = sname.c_str();
+        if(c.sequence < 0.0f && s_seq >= 0.0f) c.sequence = s_seq;
+        if(c.seq_display.length() == 0 && s_disp.length() > 0) c.seq_display = s_disp.c_str();
+      } else {
+        bool already = false;
+        for(int ex = 0; ex < c.extra_series_cnt; ex++){
+          if(c.extra_series[ex].equalsIgnoreCase(sname.c_str())){
+            already = true;
+            if(c.extra_seq[ex] < 0.0f && s_seq >= 0.0f) c.extra_seq[ex] = s_seq;
+            if(c.extra_seq_disp[ex].length() == 0 && s_disp.length() > 0) c.extra_seq_disp[ex] = s_disp.c_str();
+            break;
+          }
+        }
+        if(!already && c.extra_series_cnt < Card::MAX_EXTRA_SERIES){
+          int idx = c.extra_series_cnt++;
+          c.extra_series[idx]   = sname.c_str();
+          c.extra_seq[idx]      = s_seq;
+          c.extra_seq_disp[idx] = s_disp.c_str();
+        }
+      }
+    }
+  }
+
+  // Title fallback parsing if sequence is still missing
+  if(c.sequence < 0.0f && c.seq_display.length() == 0){
+    int hash_pos = title.indexOf('#');
+    if(hash_pos >= 0){
+      int end_pos = hash_pos + 1;
+      while(end_pos < (int)title.length() && (isDigit(title[end_pos]) || title[end_pos] == '.' || title[end_pos] == '-')) end_pos++;
+      if(end_pos > hash_pos + 1){
+        String num_str = title.substring(hash_pos + 1, end_pos);
+        c.seq_display = num_str.c_str();
+        c.sequence = num_str.toFloat();
+      }
+    }
+  }
+  c.is_highlight = is_hl;
+  c.daily        = false;
+  c.tile         = nullptr;
+  c.pool_slot    = -1;
+  int limit = (cfg::catalog_card_limit > 0 ? cfg::catalog_card_limit : 60) + 1;
+  if(s_card_count < limit){
+    for(const auto& existing : s_cards){
+      if(existing.id == c.id) return;
+      if(existing.title.length() > 0 && c.title.length() > 0 && existing.title.equalsIgnoreCase(c.title)) return;
+    }
+    s_cards.push_back(c);
+    s_card_count = (int)s_cards.size();
+  }
+}
+
+static void sort_catalog_kiosk_order(){
+  // Kiosk CatalogScreen.render() parity:
+  // Sort highlighted items first, then alphabetically by precomputed clean sort_title in O(N log N)
+  std::sort(s_cards.begin(), s_cards.end(), [](const Card& a, const Card& b){
+    if(a.daily != b.daily) return a.daily; // synthetic Yoto Daily stays first
+    if(a.is_highlight != b.is_highlight) return a.is_highlight;
+    return a.sort_title < b.sort_title;
+  });
+}
+
+
+
+bool fetch_library_core(){
+
+  s_thumbs_loading = false;
+
+  clear_card_pool_slots();
+
+  s_cards.clear();
+  s_cards.reserve(256);
+
+  s_card_count = 0;
+
+  String prof_id = "default";
+
+  if(core::s_profile_count > 0 && core::s_active_profile_idx < core::s_profile_count){
+
+    prof_id = core::s_profiles[core::s_active_profile_idx].id;
+
+  }
+
+  uint32_t t_cat0 = millis();
+
+  bool ok = core::fetch_catalog(cfg::core_url, prof_id, add_core_card);
+
+  if(!ok || s_card_count == 0){
+
+    core::fetch_catalog(cfg::core_url, "default", add_core_card);
+
+  }
+
+  log_msg("[CORE] Catalog loaded: %d cards for profile '%s' in %u ms", s_card_count, prof_id.c_str(), (unsigned)(millis() - t_cat0));
+
+  sort_catalog_kiosk_order();
+  precompute_series_metadata();
+
+  sync_active_player_playback();
+
+  return (s_card_count > 0);
+
+}
+
+
+
+void build_catalog_from_library(){
+  curation::load();
+  clear_card_pool_slots();
+  s_cards.clear();
+  s_cards.reserve(256);
+  s_card_count = 0;
+
+  static std::vector<Card, PsramVectorAlloc<Card>> last_played;
+  static std::vector<Card, PsramVectorAlloc<Card>> pinned;
+  static std::vector<Card, PsramVectorAlloc<Card>> pool;
+  last_played.clear();
+  pinned.clear();
+  pool.clear();
+
+  for(auto& item : s_library_cards){
+    // Update curation status
+    item.is_highlight = curation::is_card_pinned(item.id.c_str());
+    item.has_physical = curation::is_card_physical(item.id.c_str());
+
+    // 1. Completely hidden from catalog
+    if(curation::is_card_hidden(item.id.c_str())){
+      continue;
+    }
+
+    // 2. Physical cards hidden by grown-ups setting
+    if(curation::get_hide_physical() && item.has_physical){
+      continue;
+    }
+
+    if(item.lp.length() > 0){
+      last_played.push_back(item);
+    } else if(item.is_highlight){
+      pinned.push_back(item);
+    } else {
+      pool.push_back(item);
+    }
+  }
+
+  // Sort last-played descending
+  std::sort(last_played.begin(), last_played.end(), [](const Card& a, const Card& b){
+    return a.lp > b.lp;
+  });
+
+  // Sort pinned favorites by title
+  std::sort(pinned.begin(), pinned.end(), [](const Card& a, const Card& b){
+    return a.sort_title < b.sort_title;
+  });
+
+  // Sort discovery pool: digital before physical, then deterministic daily rotation hash
+  char date_buf[16] = "2026-11-06";
+  struct tm ti;
+  if(getLocalTime(&ti, 50)){
+    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", &ti);
+  }
+  std::sort(pool.begin(), pool.end(), [&](const Card& a, const Card& b){
+    if(a.has_physical != b.has_physical) return !a.has_physical;
+    uint32_t ha = 5381, hb = 5381;
+    for(size_t i = 0; i < strlen(date_buf); i++){ ha = ((ha << 5) + ha) + date_buf[i]; hb = ((hb << 5) + hb) + date_buf[i]; }
+    for(size_t i = 0; i < a.id.length(); i++) ha = ((ha << 5) + ha) + a.id[i];
+    for(size_t i = 0; i < b.id.length(); i++) hb = ((hb << 5) + hb) + b.id[i];
+    return ha < hb;
+  });
+
+  // Inject Yoto Daily at index 0
+  Card daily_card;
+  daily_card.id    = YOTO_DAILY_ID;
+  daily_card.title = "Yoto Daily";
+  daily_card.cover = YOTO_DAILY_COVER;
+  daily_card.daily = true;
+  s_cards.push_back(daily_card);
+
+  int limit = (cfg::catalog_card_limit > 0 ? cfg::catalog_card_limit : 60) + 1;
+  auto push_unique = [&](const Card& c) -> bool {
+    if((int)s_cards.size() >= limit) return false;
+    for(const auto& existing : s_cards){
+      if(existing.id == c.id) return false;
+      if(existing.title.length() > 0 && c.title.length() > 0 && existing.title.equalsIgnoreCase(c.title)){
+        return false;
+      }
+    }
+    s_cards.push_back(c);
+    return true;
+  };
+
+  for(const auto& c : last_played){
+    push_unique(c);
+  }
+  for(const auto& c : pinned){
+    push_unique(c);
+  }
+  for(const auto& c : pool){
+    push_unique(c);
+  }
+
+  s_card_count = (int)s_cards.size();
+  precompute_series_metadata();
+  if(s_card_count > 0 && s_sd_ok) sd_prune_stale_covers(false);
+}
+
+bool fetch_library(){
+  size_t blen = 0;
+  char* body = nullptr;
+  {
+    tlsarena::Guard tg;
+    WiFiClientSecure cli; HTTPClient http;
+    int code = yoto::get(cli, http, "/card/family/library");
+    if(code != 200){
+      if(code == 403 || code == 401){
+        show_error("Authentication Required (HTTP 403)",
+                   "Yoto rejected the request. Your Client ID, Secret, or Refresh Token\nis invalid or not yet configured.",
+                   "Open Settings below or visit the web portal to enter valid credentials.");
+      } else {
+        show_error("Library Request Failed",
+                   (String("Yoto API returned HTTP ") + code + " (free heap=" + ESP.getFreeHeap() + ")").c_str(),
+                   "Check internet connection or retry.");
+      }
+      if(code > 0) http.end();
+      return false;
+    }
+    body = read_body_psram(http, blen);
+    http.end();
+  }
+
+  if(!body){ status("Library buf alloc fail"); return false; }
+
+  JsonDocument filter;
+  filter["cards"][0]["cardId"]                             = true;
+  filter["cards"][0]["lastPlayedAt"]                       = true;
+  filter["cards"][0]["card"]["title"]                      = true;
+  filter["cards"][0]["card"]["content"]["cover"]["imageL"] = true;
+
+  PsramAllocator psram;
+  JsonDocument doc(&psram);
+  DeserializationError err = deserializeJson(doc, (const char*)body, blen, DeserializationOption::Filter(filter));
+  free(body);
+  if(err){ status((String("JSON error: ") + err.c_str() + " (" + blen + "B)").c_str()); return false; }
+
+  // 1. Populate s_library_cards with ALL cards, strictly deduplicating by cardId
+  s_library_cards.clear();
+  s_library_cards.reserve(256);
+
+  for(JsonObject c : doc["cards"].as<JsonArray>()){
+    const char* cid = (const char*)(c["cardId"] | "");
+    if(!cid || !cid[0]) continue;
+    const char* raw_title = (const char*)(c["card"]["title"] | "");
+    String title_str = raw_title ? raw_title : "";
+    title_str.trim();
+    const char* lp = (const char*)(c["lastPlayedAt"] | "");
+
+    // Check for duplicate cardId OR identical title
+    int dup_idx = -1;
+    for(size_t i = 0; i < s_library_cards.size(); i++){
+      if(s_library_cards[i].id == cid ||
+         (title_str.length() > 0 && s_library_cards[i].title.equalsIgnoreCase(title_str.c_str()))){
+        dup_idx = (int)i;
+        break;
+      }
+    }
+
+    if(dup_idx >= 0){
+      // Deduplicate: merge latest lastPlayedAt timestamp
+      if(lp && lp[0]){
+        if(s_library_cards[dup_idx].lp.length() == 0 || strcmp(lp, s_library_cards[dup_idx].lp.c_str()) > 0){
+          s_library_cards[dup_idx].lp = lp;
+        }
+      }
+      if(s_library_cards[dup_idx].cover.length() == 0){
+        const char* cov = (const char*)(c["card"]["content"]["cover"]["imageL"] | "");
+        if(cov && cov[0]) s_library_cards[dup_idx].cover = cov;
+      }
+      continue;
+    }
+
+    Card item;
+    item.id         = cid;
+    item.title      = title_str.c_str();
+    item.sort_title = clean_sort_title(item.title.c_str());
+    item.lp         = lp ? lp : "";
+    item.cover      = (const char*)(c["card"]["content"]["cover"]["imageL"] | "");
+    item.source     = 0;
+    item.is_highlight = curation::is_card_pinned(item.id.c_str());
+    item.has_physical = curation::is_card_physical(item.id.c_str());
+    item.daily      = false;
+    item.tile       = nullptr;
+    item.pool_slot  = -1;
+
+    s_library_cards.push_back(item);
+  }
+  s_library_card_count = (int)s_library_cards.size();
+  log_msg("[LIBRARY] Loaded %d unique library cards from Yoto", s_library_card_count);
+
+  // 2. Build active display catalog s_cards according to curation & limits
+  build_catalog_from_library();
+  return (s_card_count > 0);
+}
+
+// Stream one cover thumbnail into a PSRAM pool buffer and blit it onto the grid tile.
+
+static bool load_thumb(int i){
+
+  return load_thumb_for_card(i, true);
+
+}
+
+
+
+void load_thumbs(){
+
+  init_thumb_pool();
+
+  uint32_t t_th0 = millis();
+
+  int initial_preload = min(12, s_card_count);
+
+  int loaded = 0;
+
+  for(int i = 0; i < initial_preload; i++){
+
+    if(load_thumb_for_card(i, !s_sd_ok)) loaded++;
+
+  }
+
+  lv_refr_now(lv_disp_get_default());
+
+  log_msg("[SD] Preloaded %d visible covers in %u ms", loaded, (unsigned)(millis() - t_th0));
+
+  s_thumbs_loading = false;
+
+  if(s_barlabel) lv_label_set_text(s_barlabel, "Nothing playing  -  tap a book to listen");
+
+}
+
+
+
+inline void thumb_load_step(){
+
+  // During normal use, visible thumbs are maintained on scroll via update_visible_thumbs().
+
+  // When idle, precache_step() downloads uncached covers to MicroSD in the background.
+
+}
+
+
+
+static bool fetch_card_detail(int i){
+
+  Card& c = s_cards[i];
+
+  if(cfg::op_mode == "core" && cfg::core_url.length() > 0){
+
+    s_ch_count = 0;
+
+    String title_out = c.title.c_str();
+
+    bool ok = core::fetch_media_tracks(cfg::core_url, c.id.c_str(), title_out, [](const String& key, const String& trk_key, const String& tr_title, int dur){
+
+      if(s_ch_count >= MAX_CH) return;
+
+      s_ch[s_ch_count].key       = key;
+
+      s_ch[s_ch_count].track_key = trk_key;
+
+      s_ch[s_ch_count].title     = tr_title;
+
+      s_ch[s_ch_count].dur       = dur;
+
+      s_ch_count++;
+
+    });
+
+    if(ok && s_ch_count > 0){
+
+      s_detail_title = title_out;
+
+      sd_chap_write(c.id.c_str());
+
+      return true;
+
+    }
+
+  }
+
+  size_t blen = 0;
+
+  char* body = nullptr;
+
+  {
+
+    tlsarena::Guard tg;
+
+    WiFiClientSecure cli; HTTPClient http;
+
+    int code = yoto::get(cli, http, String("/card/") + c.id.c_str());
+
+    if(code != 200){ if(code > 0) http.end(); return false; }
+
+    body = read_body_psram(http, blen);
+
+    http.end();
+
+  }
+
+  if(!body) return false;
+
+  JsonDocument filter;
+  filter["card"]["title"]                                         = true;
+  filter["card"]["content"]["chapters"][0]["key"]                = true;
+  filter["card"]["content"]["chapters"][0]["title"]              = true;
+  filter["card"]["content"]["chapters"][0]["duration"]           = true;
+  filter["card"]["content"]["chapters"][0]["tracks"][0]["key"]   = true;
+  filter["card"]["content"]["tracks"][0]["key"]                  = true;
+  filter["card"]["content"]["tracks"][0]["title"]                = true;
+  filter["card"]["content"]["tracks"][0]["duration"]             = true;
+  filter["card"]["metadata"]["media"]["duration"]                 = true;
+
+  PsramAllocator psram;
+  JsonDocument doc(&psram);
+  DeserializationError err = deserializeJson(doc, (const char*)body, blen, DeserializationOption::Filter(filter));
+  free(body);
+  if(err){
+    log_msg("[DETAIL] JSON parse err for card %s: %s (blen=%u)", c.id.c_str(), err.c_str(), (unsigned)blen);
+    return false;
+  }
+
+  JsonObject card = doc["card"];
+  s_detail_title = (const char*)(card["title"] | c.title.c_str());
+  s_ch_count = 0;
+
+  // 1) Parse chapters array if present
+  for(JsonObject ch : card["content"]["chapters"].as<JsonArray>()){
+    if(s_ch_count >= MAX_CH) break;
+    String ck = (const char*)(ch["key"] | "");
+    String tk = ck;
+    JsonArray trks = ch["tracks"].as<JsonArray>();
+    if(!trks.isNull() && trks.size() > 0){
+      const char* t0 = trks[0]["key"];
+      if(t0 && *t0) tk = t0;
+    }
+    s_ch[s_ch_count].key       = ck;
+    s_ch[s_ch_count].track_key = tk;
+    s_ch[s_ch_count].title     = (const char*)(ch["title"] | "");
+    s_ch[s_ch_count].dur       = (int)(ch["duration"] | 0);
+    s_ch_count++;
+  }
+
+  // 2) Fallback to content.tracks array if chapters array was absent/empty
+  if(s_ch_count == 0 && !card["content"]["tracks"].isNull()){
+    for(JsonObject trk : card["content"]["tracks"].as<JsonArray>()){
+      if(s_ch_count >= MAX_CH) break;
+      String tk = (const char*)(trk["key"] | "");
+      s_ch[s_ch_count].key       = tk.length() ? tk : String("01");
+      s_ch[s_ch_count].track_key = tk.length() ? tk : String("01");
+      s_ch[s_ch_count].title     = (const char*)(trk["title"] | s_detail_title.c_str());
+      s_ch[s_ch_count].dur       = (int)(trk["duration"] | 0);
+      s_ch_count++;
+    }
+  }
+
+  // 3) Fallback for single-audio / interactive cards without track breakdowns
+  if(s_ch_count == 0){
+    s_ch_count = 1;
+    s_ch[0].key = "01";
+    s_ch[0].track_key = "01";
+    s_ch[0].title = s_detail_title.length() ? s_detail_title : c.title.c_str();
+    int md_dur = (int)(card["metadata"]["media"]["duration"] | 0);
+    s_ch[0].dur = md_dur > 0 ? md_dur : 1800;
+  }
+
+  log_msg("[DETAIL] Card %s ('%s') parsed %d tracks", c.id.c_str(), s_detail_title.c_str(), s_ch_count);
+  sd_chap_write(c.id.c_str());
+  return true;
+
+}
+
+
+
+// Yoto Daily: dig into card 3nC80's "daily" chapter and pick the track for `today` (YYYYMMDD).
+
+static bool fetch_daily_track(const String& today, String& outKey, String& outTitle, int& outDur){
+
+  size_t blen = 0; char* body = nullptr;
+
+  {
+
+    tlsarena::Guard tg;
+
+    WiFiClientSecure cli; HTTPClient http;
+
+    int code = yoto::get(cli, http, String("/card/") + YOTO_DAILY_ID);
+
+    if(code != 200){ if(code > 0) http.end(); return false; }
+
+    body = read_body_psram(http, blen);
+
+    http.end();
+
+  }
+
+  if(!body) return false;
+
+  JsonDocument filter;
+
+  filter["card"]["content"]["chapters"][0]["key"]                  = true;
+
+  filter["card"]["content"]["chapters"][0]["tracks"][0]["key"]      = true;
+
+  filter["card"]["content"]["chapters"][0]["tracks"][0]["title"]    = true;
+
+  filter["card"]["content"]["chapters"][0]["tracks"][0]["duration"] = true;
+
+  PsramAllocator psram;
+
+  JsonDocument doc(&psram);
+
+  DeserializationError err = deserializeJson(doc, (const char*)body, blen, DeserializationOption::Filter(filter));
+
+  free(body);
+
+  if(err) return false;
+
+  String bestKey, bestTitle; int bestDur = 0;
+
+  for(JsonObject ch : doc["card"]["content"]["chapters"].as<JsonArray>()){
+
+    if(String((const char*)(ch["key"] | "")) != "daily") continue;
+
+    for(JsonObject tr : ch["tracks"].as<JsonArray>()){
+
+      String k = (const char*)(tr["key"] | "");
+
+      if(k.length() == 0) continue;
+
+      if(k == today){
+
+        outKey = k; outTitle = (const char*)(tr["title"] | "Today's episode");
+
+        outDur = (int)(tr["duration"] | 0);
+
+        return true;
+
+      }
+
+      if(k <= today && k > bestKey){
+
+        bestKey = k; bestTitle = (const char*)(tr["title"] | "Today's episode");
+
+        bestDur = (int)(tr["duration"] | 0);
+
+      }
+
+    }
+
+    break;
+
+  }
+
+  if(bestKey.length()){ outKey = bestKey; outTitle = bestTitle; outDur = bestDur; return true; }
+
+  return false;
+
+}
+
+
+
+// ---------------- background library warmer ----------------
+static int  s_pc_cursor = 0;     // next card to inspect
+static int  s_pc_pass   = 0;     // Pass 0 = Grid Thumbnails (highest priority); Pass 1 = Detail/Nowbar; Pass 2 = Chapters
+static int  s_pc_fail   = 0;     // consecutive failures on the current item (bounded, then skip)
+static bool s_pc_done   = false; // whole library warm — stop scanning until the next reboot
+#define PC_MIN_INTERNAL_BLOCK 12288
+
+static void precache_step(){
+  if(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < PC_MIN_INTERNAL_BLOCK) return;
+  if(s_card_count <= 0) return;
+
+  while(s_pc_pass < 3){
+    while(s_pc_cursor < s_card_count){
+      Card& c = s_cards[s_pc_cursor];
+      if(c.daily){ s_pc_cursor++; s_pc_fail = 0; continue; }
+
+      if(s_pc_pass == 0){
+        // PASS 0: Grid thumbnail covers (160x254) -> {id}_160.565
+        // Priority #1 so the child sees all covers when scrolling the catalog!
+        if(!sd_cache_exists(c.id.c_str(), THUMB_W, c.cover.c_str())){
+          if(!s_dcover) s_dcover = (uint8_t*)heap_caps_malloc(DCOVER_SZ, MALLOC_CAP_SPIRAM);
+          bool ok = s_dcover && load_cover_cached(c.id.c_str(), c.cover.c_str(), THUMB_W, THUMB_H, THUMB_SZ, s_dcover);
+          if(!ok && ++s_pc_fail < 2){
+            return;
+          }
+          s_pc_cursor++; s_pc_fail = 0;
+          return;
+        }
+      } else if(s_pc_pass == 1){
+        // PASS 1: Detail-size (210x333) and Now-Playing (170x170) covers
+        if(!sd_cache_exists(c.id.c_str(), DCOVER_W, c.cover.c_str())){
+          if(!s_dcover) s_dcover = (uint8_t*)heap_caps_malloc(DCOVER_SZ, MALLOC_CAP_SPIRAM);
+          bool ok = s_dcover && load_cover_cached(c.id.c_str(), c.cover.c_str(), DCOVER_W, DCOVER_H, DCOVER_SZ, s_dcover);
+          if(!ok && ++s_pc_fail < 2) return;
+          s_pc_cursor++; s_pc_fail = 0;
+          return;
+        }
+        if(!sd_cache_exists(c.id.c_str(), NCOVER_W, c.cover.c_str())){
+          if(!s_dcover) s_dcover = (uint8_t*)heap_caps_malloc(DCOVER_SZ, MALLOC_CAP_SPIRAM);
+          bool ok = s_dcover && load_cover_cached(c.id.c_str(), c.cover.c_str(), NCOVER_W, NCOVER_H, NCOVER_SZ, s_dcover);
+          if(!ok && ++s_pc_fail < 2) return;
+          s_pc_cursor++; s_pc_fail = 0;
+          return;
+        }
+      } else if(s_pc_pass == 2){
+        // PASS 2: Chapter lists -> {id}.chap
+        if(!SD.exists(sd_chap_path(c.id.c_str()))){
+          static Chapter sv[MAX_CH];
+          int svc = s_ch_count; String svt = s_detail_title;
+          for(int k=0;k<svc;k++) sv[k] = s_ch[k];
+          bool ok = fetch_card_detail(s_pc_cursor);
+          for(int k=0;k<svc;k++){ s_ch[k] = sv[k]; sv[k].key = String(); sv[k].track_key = String(); sv[k].title = String(); }
+          s_ch_count = svc; s_detail_title = svt;
+          if(!ok && ++s_pc_fail < 2) return;
+          s_pc_cursor++; s_pc_fail = 0;
+          return;
+        }
+      }
+      s_pc_cursor++;
+      s_pc_fail = 0;
+    }
+    // Completed a pass through all cards: proceed to next pass
+    s_pc_pass++;
+    s_pc_cursor = 0;
+    s_pc_fail = 0;
+    log_msg("[CACHE] Precache pass %d completed across %d items", s_pc_pass, s_card_count);
+  }
+  s_pc_done = true;
+}
+
