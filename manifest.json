@@ -1,0 +1,29 @@
+{
+  "name": "Waveshare 4.3\" ESP32-S3 Touch (LCD-4.3B) (v0.1.0)",
+  "version": "v0.1.0",
+  "home_assistant_domain": "storydeck",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "bin/waveshare-s3-43b/v0.1.0/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "bin/waveshare-s3-43b/v0.1.0/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "bin/waveshare-s3-43b/v0.1.0/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "bin/waveshare-s3-43b/v0.1.0/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

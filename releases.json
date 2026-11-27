@@ -5,9 +5,19 @@
     "waveshare-s3-43b": {
       "name": "Waveshare 4.3\" ESP32-S3 Touch (LCD-4.3B)",
       "chip_family": "ESP32-S3",
-      "latest_stable": null,
+      "latest_stable": "v0.1.0",
       "latest_prerelease": null,
-      "releases": []
+      "releases": [
+        {
+          "version": "v0.1.0",
+          "channel": "stable",
+          "name": "Waveshare 4.3\" ESP32-S3 Touch (LCD-4.3B) v0.1.0 (Stable)",
+          "manifest": "manifests/waveshare-s3-43b/manifest-v0.1.0.json",
+          "firmware": "bin/waveshare-s3-43b/v0.1.0/firmware.bin",
+          "firmware_sha256": "2d48465e52230140043fccd4f6fb0054d2cb27da6d1cafd8941d6eaab2654bf7",
+          "published_at": "2026-11-27T20:54:23.408840+00:00"
+        }
+      ]
     }
   }
 }
