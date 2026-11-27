@@ -86,7 +86,7 @@ inline bool sd_cache_exists(const String& id, int W, const String& coverUrl = ""
     return r_ok && (stored_h == sd_cover_url_hash(coverUrl));
   }
   f.close();
-  return (fsz == want || fsz == want + 4 || fsz > 0);
+  return (fsz == want || fsz == want + 4);
 }
 
 inline bool sd_cache_read(const String& id, int W, uint8_t* buf, size_t want, const String& coverUrl = ""){
@@ -140,11 +140,19 @@ inline bool sd_rd_str(File& f, String& out){
   uint16_t n;
   if(f.read((uint8_t*)&n, 2) != 2) return false;
   out = "";
-  if(n){
-    char* b = (char*)malloc(n + 1);
-    if(!b) return false;
-    if(f.read((uint8_t*)b, n) != (int)n) { free(b); return false; }
-    b[n] = 0; out = b; free(b);
+  if(n > 0){
+    if(n < 128){
+      char stk[128];
+      if(f.read((uint8_t*)stk, n) != (int)n) return false;
+      stk[n] = '\0';
+      out = stk;
+    } else {
+      char* b = (char*)heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM);
+      if(!b) b = (char*)malloc(n + 1);
+      if(!b) return false;
+      if(f.read((uint8_t*)b, n) != (int)n){ free(b); return false; }
+      b[n] = '\0'; out = b; free(b);
+    }
   }
   return true;
 }

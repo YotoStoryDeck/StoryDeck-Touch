@@ -19,6 +19,7 @@ Responsibilities:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -243,11 +244,15 @@ def sync_device_release(
     existing_releases: List[Dict[str, Any]] = device_entry.get("releases", [])
 
     # Check if entry already exists
+    fw_rel_path = f"bin/{device_id}/{tag}/firmware.bin"
+    fw_sha256 = hashlib.sha256((bin_tag_dir / "firmware.bin").read_bytes()).hexdigest()
     matched = False
     for r in existing_releases:
         if r.get("version") == tag:
             r["channel"] = channel
             r["manifest"] = f"manifests/{device_id}/manifest-{tag}.json"
+            r["firmware"] = fw_rel_path
+            r["firmware_sha256"] = fw_sha256
             r["published_at"] = r.get("published_at") or now_iso
             matched = True
             break
@@ -257,6 +262,8 @@ def sync_device_release(
             "channel": channel,
             "name": f"{device_name} {tag} ({channel.capitalize()})",
             "manifest": f"manifests/{device_id}/manifest-{tag}.json",
+            "firmware": fw_rel_path,
+            "firmware_sha256": fw_sha256,
             "published_at": now_iso,
         })
 
@@ -281,8 +288,15 @@ def sync_device_release(
         pruned_count += 1
         print(f"🗑️ Pruned evicted build for {device_id}: {pt}")
 
-    # Keep only retained release entries in releases.json
+    # Keep only retained release entries in releases.json and ensure firmware/sha256 fields exist
     kept_releases = [r for r in existing_releases if r.get("version") in retained_tags]
+    for r in kept_releases:
+        ver = r.get("version", "")
+        fw_file = website_dir / "bin" / device_id / ver / "firmware.bin"
+        if fw_file.is_file():
+            r.setdefault("firmware", f"bin/{device_id}/{ver}/firmware.bin")
+            if not r.get("firmware_sha256"):
+                r["firmware_sha256"] = hashlib.sha256(fw_file.read_bytes()).hexdigest()
     # Sort releases descending by semver tuple
     kept_releases.sort(key=lambda r: parse_semver(r.get("version", "")) or (0, 0, 0, 0, 0, 0), reverse=True)
     device_entry["releases"] = kept_releases
