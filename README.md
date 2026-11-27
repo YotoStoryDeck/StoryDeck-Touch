@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" alt="StoryDeck Logo" width="96" height="96">
+</p>
+
 # StoryDeck Touch — Web Flasher Website
 
 This branch (`website`) is dedicated exclusively to hosting the **StoryDeck Touch Web Installer** on GitHub Pages.
