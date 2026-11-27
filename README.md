@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" alt="StoryDeck Logo" width="96" height="96">
+</p>
+
 # StoryDeck Touch
 
 A dedicated, kid-friendly bedside **touchscreen companion controller** for [Yoto](https://yoto.dev) players, powered by the **ESP32-S3** and **LVGL**.

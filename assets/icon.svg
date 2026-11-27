@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E5352B"/>
+      <stop offset="100%" stop-color="#C52319"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Rounded Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Left Open-Book Page -->
+  <path fill="#FBF7F0" d="
+    M 118 128
+    C 178 128, 224 140, 236 178
+    L 236 336
+    C 226 324, 180 318, 118 318
+    C 100 318, 92 310, 92 294
+    L 92 152
+    C 92 136, 100 128, 118 128
+    Z"/>
+
+  <!-- Smooth Spine U-Hook (Cream -> Gold Page Tail) -->
+  <path fill="none" stroke="#FBF7F0" stroke-width="16" stroke-linecap="round"
+        d="M 228 326 C 228 380, 268 382, 286 354"/>
+  <path fill="none" stroke="#FFB02E" stroke-width="16" stroke-linecap="round"
+        d="M 286 354 C 326 336, 376 336, 412 346"/>
+
+  <!-- Spine Crease Line -->
+  <rect x="252" y="160" width="12" height="176" rx="6" fill="#FBF7F0"/>
+
+  <!-- Soundwave / Deck Bars -->
+  <rect x="280" y="136" width="36" height="188" rx="18" fill="#FBF7F0"/>
+  <rect x="332" y="160" width="36" height="164" rx="18" fill="#FFB02E"/>
+  <rect x="384" y="186" width="36" height="138" rx="18" fill="#FBF7F0"/>
+</svg>
