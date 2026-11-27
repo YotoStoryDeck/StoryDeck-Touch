@@ -452,7 +452,22 @@
         </div>
       </div>
 
-      <div class="flash-box">
+      <!-- Install Method Selector -->
+      <div class="channel-selector-wrapper">
+        <label style="display: block; font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">
+          Install Method:
+        </label>
+        <div class="channel-tabs">
+          <button id="method-usb" class="channel-tab active" onclick="setInstallMethod('usb')">
+            <span>🔌</span> First-Time USB Install
+          </button>
+          <button id="method-ota" class="channel-tab" onclick="setInstallMethod('ota')">
+            <span>📡</span> Wireless Update (OTA)
+          </button>
+        </div>
+      </div>
+
+      <div id="usb-flash-box" class="flash-box">
         <div class="flash-box-icon">📟</div>
         <h3>Ready to Install Firmware</h3>
         <p id="flash-instructions">Connect your Waveshare 4.3" ESP32-S3 board to your PC via USB-C to begin.</p>
@@ -468,6 +483,41 @@
             </div>
           </esp-web-install-button>
         </div>
+      </div>
+
+      <div id="ota-flash-box" class="flash-box" style="display: none;">
+        <div class="flash-box-icon">📡</div>
+        <h3>Wireless Update Over Wi-Fi (OTA)</h3>
+        <p>Requires <strong>StoryDeck Touch v0.1.0+</strong> already flashed once via USB on a <strong>Waveshare ESP32-S3-Touch-LCD-4.3B</strong> and connected to your home Wi-Fi (no StoryDeck Core required).</p>
+
+        <div style="max-width: 420px; margin: 0 auto 18px; text-align: left;">
+          <label for="ota-host-input" style="display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+            Device Hostname or IP Address
+          </label>
+          <input id="ota-host-input" type="text" value="storydeck-touch.local" placeholder="storydeck-touch.local or 192.168.1.50" oninput="saveOtaHost(this.value)" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; font-family: monospace; background: #FFFFFF; color: var(--text-main);">
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">
+            Find your board's IP in its on-screen Settings Menu if <code>storydeck-touch.local</code> does not resolve.
+          </div>
+        </div>
+
+        <button id="btn-ota-send" type="button" class="btn-install" onclick="launchWebOta()">
+          <span>📡</span> Send Update to Device
+        </button>
+
+        <p style="font-size: 12px; color: var(--text-muted); margin-top: 12px; margin-bottom: 14px;">
+          Opens your device's confirmation page and asks for your 4-digit <strong>Settings PIN</strong> before installing.
+        </p>
+
+        <details style="max-width: 480px; margin: 0 auto; text-align: left;">
+          <summary style="font-size: 13px; padding: 10px 14px;">Updating from an older firmware?</summary>
+          <div class="details-body" style="font-size: 13px;">
+            If your board opens a "Not Found" page instead of the update confirmation screen, flash once through the older built-in uploader:
+            <ol style="padding-left: 18px; margin-top: 8px;">
+              <li><a id="ota-download-link" href="#" download="firmware.bin" style="color: var(--primary); font-weight: 600;">Download firmware.bin</a> for the selected version.</li>
+              <li>Open <a id="ota-legacy-link" href="http://storydeck-touch.local/update" target="_blank" rel="noopener" style="color: var(--primary); font-weight: 600;">Device /update Page</a>, choose <strong>Firmware</strong>, and upload the file.</li>
+            </ol>
+          </div>
+        </details>
       </div>
 
       <div class="steps-title">
@@ -600,10 +650,61 @@ pio run -e waveshare-s3-43b -t upload</pre>
   </div>
 
   <script>
+    let installMethod = 'usb';
     let currentChannel = 'stable';
     let currentDevice = 'waveshare-s3-43b';
     let releasesData = null;
     let currentManifest = 'manifest-stable.json';
+    let selectedReleaseInfo = { version: 'v0.1.0', firmwareUrl: '', sha256: '' };
+
+    function setInstallMethod(method) {
+      installMethod = method === 'ota' ? 'ota' : 'usb';
+      const usbTab = document.getElementById('method-usb');
+      const otaTab = document.getElementById('method-ota');
+      const usbBox = document.getElementById('usb-flash-box');
+      const otaBox = document.getElementById('ota-flash-box');
+      if (usbTab) usbTab.classList.toggle('active', installMethod === 'usb');
+      if (otaTab) otaTab.classList.toggle('active', installMethod === 'ota');
+      if (usbBox) usbBox.style.display = installMethod === 'usb' ? 'block' : 'none';
+      if (otaBox) otaBox.style.display = installMethod === 'ota' ? 'block' : 'none';
+    }
+
+    function normalizeOtaHost(raw) {
+      let host = String(raw || '').trim();
+      host = host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+      return host || 'storydeck-touch.local';
+    }
+
+    function saveOtaHost(val) {
+      try { localStorage.setItem('sd_ota_host', val); } catch {}
+      updateOtaLegacyLinks();
+    }
+
+    function updateOtaLegacyLinks() {
+      const hostIn = document.getElementById('ota-host-input');
+      const host = normalizeOtaHost(hostIn ? hostIn.value : '');
+      const legacyLink = document.getElementById('ota-legacy-link');
+      if (legacyLink) legacyLink.href = 'http://' + host + '/update';
+      const dlLink = document.getElementById('ota-download-link');
+      if (dlLink && selectedReleaseInfo.firmwareUrl) {
+        dlLink.href = selectedReleaseInfo.firmwareUrl;
+      }
+    }
+
+    function launchWebOta() {
+      const hostIn = document.getElementById('ota-host-input');
+      const host = normalizeOtaHost(hostIn ? hostIn.value : '');
+      if (hostIn) hostIn.value = host;
+      if (!selectedReleaseInfo.firmwareUrl) {
+        alert('No firmware release found for this channel yet.');
+        return;
+      }
+      const target = 'http://' + host + '/ota-web'
+        + '?version=' + encodeURIComponent(selectedReleaseInfo.version || '')
+        + '&url=' + encodeURIComponent(selectedReleaseInfo.firmwareUrl)
+        + '&sha256=' + encodeURIComponent(selectedReleaseInfo.sha256 || '');
+      window.open(target, '_blank', 'noopener');
+    }
 
     async function fetchReleasesIndex() {
       try {
@@ -731,6 +832,22 @@ pio run -e waveshare-s3-43b -t upload</pre>
     }
 
     function renderFlasherButton(manifestPath, version) {
+      const dev = releasesData && releasesData.devices ? releasesData.devices[currentDevice] : null;
+      const releases = dev && Array.isArray(dev.releases) ? dev.releases : [];
+      const rel = releases.find(r => r.version === version);
+      const baseHref = window.location.href.split('#')[0].split('?')[0].replace(/\/[^\/]*$/, '/');
+      const fwRelPath = (rel && rel.firmware) ? rel.firmware : `bin/${currentDevice}/${version}/firmware.bin`;
+      selectedReleaseInfo = {
+        version: version,
+        firmwareUrl: fwRelPath.startsWith('http') ? fwRelPath : (baseHref + fwRelPath.replace(/^\/+/, '')),
+        sha256: (rel && rel.firmware_sha256) ? rel.firmware_sha256 : ''
+      };
+      const otaBtn = document.getElementById('btn-ota-send');
+      if (otaBtn) {
+        otaBtn.innerHTML = `<span>📡</span> Send Update to Device (${version})`;
+      }
+      updateOtaLegacyLinks();
+
       const container = document.getElementById('flasher-container');
       if (!container) return;
       container.innerHTML = `
@@ -746,7 +863,14 @@ pio run -e waveshare-s3-43b -t upload</pre>
     }
 
     // Initialize on page load
-    window.addEventListener('DOMContentLoaded', initChannels);
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        const savedHost = localStorage.getItem('sd_ota_host');
+        const hostIn = document.getElementById('ota-host-input');
+        if (savedHost && hostIn) hostIn.value = savedHost;
+      } catch {}
+      initChannels();
+    });
   </script>
 
 </body>
