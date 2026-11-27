@@ -56,6 +56,9 @@ static void handle_post(WebServer& w){
   v = w.arg("rothr");  if(v.length()){ int h = v.toInt(); if(h >= 0 && h <= 23) cfg::rotation_hour = h; }
   v = w.arg("vollim"); if(v.length()){ int vl = v.toInt(); if(vl >= 10 && vl <= 100) cfg::vol_limit = vl; }
   cfg::save();
+  if(cfg::op_mode == "core" && cfg::core_url.length() > 0 && WiFi.status() == WL_CONNECTED){
+    core::push_device_settings(cfg::core_url);
+  }
   v = w.arg("rt");
   if(v.length()) yoto::set_refresh(v);                  // also clears the cached access token
 

@@ -188,6 +188,17 @@ inline bool register_device(const String& base_url, String& err_out){
   doc["friendly_name"]    = cfg::kiosk_name.length() > 0 ? cfg::kiosk_name : "StoryDeck Touch (ESP32-S3)";
   doc["ip_address"]       = WiFi.localIP().toString();
   doc["firmware_version"] = STORYDECK_VERSION;
+  if(cfg::assigned_profile.length() > 0){
+    doc["assigned_profile"] = cfg::assigned_profile;
+  }
+  if(cfg::lock_player || cfg::locked_dev_id.length() > 0){
+    String locked_id = cfg::locked_dev_id.length() > 0 ? cfg::locked_dev_id : cfg::device_id;
+    doc["lock_player"] = true;
+    if(locked_id.length() > 0) doc["locked_player_id"] = locked_id;
+  }
+  if(cfg::parent_pin.length() == 4){
+    doc["parent_pin"] = cfg::parent_pin;
+  }
 
   String payload;
   serializeJson(doc, payload);
@@ -442,6 +453,34 @@ inline bool fetch_config_and_profiles(const String& base_url, bool prune_avatars
     }
   }
   return (s_profile_count > 0);
+}
+
+// 4. Push local device settings / profile & player lock state to StoryDeck Core
+inline bool push_device_settings(const String& base_url){
+  if(base_url.length() == 0) return false;
+  WiFiClientSecure scli; WiFiClient pcli; HTTPClient http;
+  if(!http_begin_url(http, scli, pcli, base_url + "/api/device/settings")) return false;
+  http.addHeader("Content-Type", "application/json");
+  if(s_access_token.length() > 0){
+    http.addHeader("Authorization", String("Bearer ") + s_access_token);
+  }
+  http.setTimeout(1500);
+
+  JsonDocument doc;
+  doc["device_id"]        = get_mac();
+  doc["friendly_name"]    = cfg::kiosk_name.length() > 0 ? cfg::kiosk_name : "StoryDeck Touch (ESP32-S3)";
+  doc["assigned_profile"] = cfg::assigned_profile;
+  doc["lock_player"]      = cfg::lock_player;
+  doc["locked_player_id"] = cfg::locked_dev_id;
+  if(cfg::parent_pin.length() == 4){
+    doc["parent_pin"] = cfg::parent_pin;
+  }
+
+  String payload;
+  serializeJson(doc, payload);
+  int code = http.POST(payload);
+  http.end();
+  return (code >= 200 && code < 300);
 }
 
 } // namespace core
