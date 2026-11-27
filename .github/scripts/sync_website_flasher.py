@@ -137,6 +137,7 @@ def generate_manifest_data(
     chip_family: str,
     tag: str,
     device_id: str,
+    path_prefix: str = "",
 ) -> Dict[str, Any]:
     """Builds standard ESP Web Tools manifest JSON structure."""
     return {
@@ -148,10 +149,10 @@ def generate_manifest_data(
             {
                 "chipFamily": chip_family,
                 "parts": [
-                    {"path": f"bin/{device_id}/{tag}/bootloader.bin", "offset": 0},
-                    {"path": f"bin/{device_id}/{tag}/partitions.bin", "offset": 32768},
-                    {"path": f"bin/{device_id}/{tag}/boot_app0.bin", "offset": 57344},
-                    {"path": f"bin/{device_id}/{tag}/firmware.bin", "offset": 65536},
+                    {"path": f"{path_prefix}bin/{device_id}/{tag}/bootloader.bin", "offset": 0},
+                    {"path": f"{path_prefix}bin/{device_id}/{tag}/partitions.bin", "offset": 32768},
+                    {"path": f"{path_prefix}bin/{device_id}/{tag}/boot_app0.bin", "offset": 57344},
+                    {"path": f"{path_prefix}bin/{device_id}/{tag}/firmware.bin", "offset": 65536},
                 ],
             }
         ],
@@ -203,9 +204,9 @@ def sync_device_release(
     else:
         raise FileNotFoundError(f"boot_app0.bin could not be found in {build_dir} or {website_dir}/bin/")
 
-    # 2. Write versioned manifest
+    # 2. Write versioned manifest (nested 2 dirs deep under manifests/<device_id>/)
     manifest_file = manifest_dir / f"manifest-{tag}.json"
-    manifest_data = generate_manifest_data(device_name, chip_family, tag, device_id)
+    manifest_data = generate_manifest_data(device_name, chip_family, tag, device_id, path_prefix="../../")
     manifest_file.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
 
     # 3. Load or initialize releases.json (Schema v2)

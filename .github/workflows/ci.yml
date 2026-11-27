@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  firmware-build:
+    name: Firmware Build & Script Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Run release script unit tests
+        run: python3 .github/scripts/test_sync_website_flasher.py
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+
+      - name: Configure Firmware Build Seeds
+        run: |
+          if [ ! -f secrets.h ]; then
+            cp secrets.h.example secrets.h
+          fi
+
+      - name: Build Waveshare ESP32-S3 Firmware
+        env:
+          STORYDECK_VERSION: ci-${{ github.sha }}
+        run: pio run -e waveshare-s3-43b

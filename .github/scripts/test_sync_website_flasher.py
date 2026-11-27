@@ -111,7 +111,12 @@ class TestSyncWebsiteFlasher(unittest.TestCase):
             )
             self.assertIn("v0.1.0", res1["retained_tags"])
             self.assertTrue((website_dir / "bin" / device_id / "v0.1.0" / "firmware.bin").is_file())
-            self.assertTrue((website_dir / "manifests" / device_id / "manifest-v0.1.0.json").is_file())
+            v010_manifest_path = website_dir / "manifests" / device_id / "manifest-v0.1.0.json"
+            self.assertTrue(v010_manifest_path.is_file())
+            v010_manifest = json.loads(v010_manifest_path.read_text(encoding="utf-8"))
+            v010_parts = v010_manifest["builds"][0]["parts"]
+            self.assertEqual(v010_parts[0]["path"], f"../../bin/{device_id}/v0.1.0/bootloader.bin")
+            self.assertTrue(all(p["path"].startswith(f"../../bin/{device_id}/v0.1.0/") for p in v010_parts))
 
             # 2. Sync v0.1.1 (Stable)
             sync_website_flasher.sync_device_release(
@@ -141,6 +146,14 @@ class TestSyncWebsiteFlasher(unittest.TestCase):
             # Ensure v0.1.1 and v0.1.2 remain
             self.assertTrue((website_dir / "bin" / device_id / "v0.1.1").exists())
             self.assertTrue((website_dir / "bin" / device_id / "v0.1.2").exists())
+
+            # 4. Verify root legacy manifests still use bin/<device_id>/... relative to site root
+            for root_name in ("manifest-stable.json", "manifest.json"):
+                root_manifest = json.loads((website_dir / root_name).read_text(encoding="utf-8"))
+                self.assertEqual(
+                    root_manifest["builds"][0]["parts"][0]["path"],
+                    f"bin/{device_id}/v0.1.2/bootloader.bin",
+                )
 
             # 4. Verify releases.json
             releases_json = json.loads((website_dir / "releases.json").read_text(encoding="utf-8"))
