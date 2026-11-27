@@ -8,15 +8,18 @@
 #include "yoto_api.h"
 #include "core_api.h"
 #include "standalone_curation.h"
+#include "ota_pull.h"
 
 extern bool fetch_library();
 extern void build_catalog_from_library();
 extern void build_grid();
 extern bool fetch_library_core();
 extern void np_update_vol_ui();
+extern void reload_catalog_and_thumbs(bool refetch_standalone = false);
 
 #include "web_portal_html.h"
 #include "web_portal_oauth.h"
+#include "web_portal_pages.h"
 #include "web_portal_api.h"
 
 namespace portal {

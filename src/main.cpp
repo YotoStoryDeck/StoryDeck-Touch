@@ -123,33 +123,7 @@ void net_init_and_fetch(){
     } else if(cfg::op_mode != "core"){
       // Standalone mode: discover all Yoto players on the account via GET /device-v2/devices/mine
       status("Discovering Yoto Players...");
-      size_t blen = 0; char* body = nullptr;
-      {
-        tlsarena::Guard tg;
-        WiFiClientSecure cli; HTTPClient http;
-        int code = yoto::get(cli, http, "/device-v2/devices/mine");
-        if(code == 200) body = read_body_psram(http, blen);
-        if(code > 0) http.end();
-      }
-      if(body){
-        PsramAllocator psram; JsonDocument doc(&psram);
-        if(!deserializeJson(doc, (const char*)body, blen)){
-          core::s_standalone_player_count = 0;
-          for(JsonObject d : doc["devices"].as<JsonArray>()){
-            if(core::s_standalone_player_count >= MAX_PROF_PLAYERS) break;
-            String did = (const char*)(d["deviceId"] | d["id"] | "");
-            if(did.length() == 0) continue;
-            core::PlayerInfo& pi = core::s_standalone_players[core::s_standalone_player_count++];
-            pi.id      = did;
-            pi.name    = (const char*)(d["name"] | "Yoto Player");
-            pi.online  = (bool)(d["online"] | false);
-            pi.is_home = pi.online;
-            pi.volume  = (int)(d["volume"] | 50);
-            pi.volume_max = (int)(d["volume_max"] | 100);
-          }
-        }
-        free(body);
-      }
+      core::discover_standalone_players();
       cfg::device_id = core::resolve_active_device_id(-1);
     }
 
@@ -236,10 +210,14 @@ void setup(){
   }
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);                     // no modem-sleep: pm_dream wake re-enables the PHY and aborts if internal RAM is empty
-  WiFi.begin(cfg::wifi_ssid.c_str(), cfg::wifi_pass.c_str());
+  if(cfg::wifi_ssid.length() > 0 && cfg::wifi_ssid != "your-2.4GHz-ssid"){
+    WiFi.begin(cfg::wifi_ssid.c_str(), cfg::wifi_pass.c_str());
+  }
 
   // hardware: backlight + panel + touch
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000); delay(10);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+  Wire.setTimeOut(50);
+  delay(10);
   ch422g_write(CH422G_WR_SET, 0x01);
   s_io_shadow=(1u<<EXIO_BL_DISP)|(1u<<EXIO_TP_RST); ch422g_flush(); delay(20);
   ch422g_set(EXIO_LCD_RST,true); delay(120);
@@ -301,9 +279,7 @@ void setup(){
   lv_timer_create(tick_cb, 1000, NULL);     // 1 Hz heartbeat: progress/sleep timer/screensaver
 
 #ifdef WOKWI_SIMULATION
-  // In Wokwi simulation, start the web server BEFORE net_init_and_fetch() so http://localhost:8180/screen
-  // and /settings are immediately live while connecting to StoryDeck Core.
-  ota_begin();
+  // In Wokwi simulation, probe host StoryDeck Core before net_init_and_fetch() runs.
   if(WiFi.status() == WL_CONNECTED && cfg::op_mode == "core"){
     if(!core::ping(cfg::core_url)){
       if(core::ping("http://host.wokwi.internal:5055")) cfg::core_url = "http://host.wokwi.internal:5055";
@@ -372,11 +348,21 @@ void loop(){
       s_last_catalog_refresh_t = millis();
       if(cfg::op_mode == "core" && cfg::core_url.length() > 0){
         core::fetch_config_and_profiles(cfg::core_url);
-        fetch_library_core();
-      } else {
-        fetch_library();
       }
-      if(s_scr_home && act == s_scr_home) build_grid();
+      reload_catalog_and_thumbs(true);
+    }
+  }
+
+  // Boot + Daily Firmware Update Check (checks GitHub Pages releases.json once after boot and every 24h while idle)
+  static bool     s_ota_boot_checked = false;
+  static uint32_t s_last_ota_check_t = 0;
+  const uint32_t  ONE_DAY_MS = 24UL * 60UL * 60UL * 1000UL;
+  if(cfg::auto_update_check && WiFi.status() == WL_CONNECTED && millis() > 25000 && !s_thumbs_loading && !is_ui_interacting() &&
+     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > 20000){
+    if(!s_ota_boot_checked || (millis() - s_last_ota_check_t > ONE_DAY_MS)){
+      s_ota_boot_checked = true;
+      s_last_ota_check_t = millis();
+      ota_check_for_updates();
     }
   }
 
@@ -407,6 +393,10 @@ void loop(){
       }
       if(s_scr_now && lv_scr_act() == s_scr_now){
         np_set_chapter_label(); np_set_playicon(); np_update_progress(); np_update_vol_ui();
+      }
+      if(core::s_catalog_dirty && !is_ui_interacting()){
+        log_msg("[CORE] Applying live curation refresh");
+        reload_catalog_and_thumbs(false);
       }
     } else if(!core::s_is_approved && !s_scr_pairing){
       log_msg("[CORE] Device unapproved/quarantined in Core! Transitioning to pairing screen immediately.");

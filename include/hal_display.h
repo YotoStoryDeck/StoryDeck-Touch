@@ -319,19 +319,3 @@ static void touch_cb(lv_indev_drv_t* drv, lv_indev_data_t* data){
   data->state=s_tstate;
   data->point.x=s_lx; data->point.y=s_ly;
 }
-
-// ---------------- display-flicker diagnostic: on-demand PSRAM bus load ----------------
-static volatile uint32_t s_flick_until = 0;       // millis() deadline; load runs while now < this
-static TaskHandle_t      s_flick_task  = nullptr;
-static void flick_stress_task(void*){
-  const size_t SZ = 2*1024*1024;
-  uint8_t* buf = (uint8_t*)heap_caps_malloc(SZ, MALLOC_CAP_SPIRAM);
-  for(;;){
-    if(buf && (int32_t)(s_flick_until - millis()) > 0){
-      memcpy(buf, buf + SZ/2, SZ/2);
-      vTaskDelay(1);
-    } else {
-      vTaskDelay(pdMS_TO_TICKS(20));
-    }
-  }
-}

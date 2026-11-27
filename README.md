@@ -4,132 +4,96 @@
 
 # StoryDeck Touch
 
-A dedicated, kid-friendly bedside **touchscreen companion controller** for [Yoto](https://yoto.dev) players, powered by the **ESP32-S3** and **LVGL**.
+A dedicated bedside **touchscreen companion controller** for [Yoto](https://yoto.dev) players, powered by the **ESP32-S3**.
 
-Children can independently browse their audiobook and music library, view full-color cover art, choose chapters, and start playback on their bedroom Yoto Player—without needing a phone, tablet, or parental intervention.
+Listeners can browse their audiobook and music library with full-color cover art, pick individual chapters, and start playback on their Yoto Player with a single tap—without needing a phone or tablet nearby.
 
 ---
 
 ## 🌟 Modes of Operation
 
-StoryDeck Touch supports two flexible operational modes:
+StoryDeck Touch supports two ways to run:
 
-1. **StoryDeck Core Mode (Managed — Recommended):**
-   * Pairs with a self-hosted [**StoryDeck Core**](https://github.com/YotoStoryDeck/StoryDeck-Core) hub.
-   * Browses unified libraries combining **Audiobookshelf (ABS)** and Yoto playlists.
-   * Features multi-child profile switching, parental tag filtering, bedtime controls, and planned Home Assistant integration.
-   * Seamless pairing: device announces itself and pairs via Core Admin approval, communicating using rotating JWT tokens with zero cloud credentials stored on the bedside unit.
+1. **StoryDeck Core Mode (Recommended):**
+   * Connects to a self-hosted [**StoryDeck Core**](https://github.com/YotoStoryDeck/StoryDeck-Core) hub.
+   * Shows curated libraries combining **Audiobookshelf** and **Yoto** playlists.
+   * Supports **Listener Profiles**, content filtering, sleep timers, travel safety, and remote firmware updates.
+   * Easy pairing: approve the screen from Core's Admin Console with one click—zero cloud secrets stored on the device.
 
 2. **Standalone Mode (Direct Yoto Cloud):**
-   * Operates completely independently without a local server.
-   * Talks directly to the official Yoto Developer API over Wi-Fi.
-   * Directly mirrors Yoto account players without child profile or avatar selection.
-   * Automatically refreshes its own OAuth tokens stored in secure ESP32 NVS flash.
+   * Works independently with no home server required.
+   * Connects directly to your Yoto account over Wi-Fi and lists your Yoto cards and players.
 
 ---
 
-## 📺 User Interface & Screens
+## 📺 Screens & Controls
 
-| Screen | Description |
+| Screen | What It Does |
 | --- | --- |
-| **Profile Select** | Time-aware greeting ("Who is listening this morning/afternoon/tonight?") with centered multi-child avatar grid. |
-| **Catalog Grid** | Responsive grid of cover art thumbnails (160×254px) with series grouping, highlight sorting, and ABS/Yoto source badges. |
-| **Book Detail** | High-res cover art (210×333px), track/chapter list with 16×16 pixel icons, direct Series navigation button, and instant play trigger. |
-| **Now Playing** | Real-time playback status, album art, progress bar, skip controls, and volume slider with native Yoto volume ceilings. |
-| **Night Clock** | Low-glare screensaver with configurable Red (Bedtime) and Green (OK-to-wake) indicators, live date display, and 8-point orbital pixel shifting burn-in protection. |
-| **Grown-Ups Screen** | Hidden parental settings menu (long-press gear + 4-digit PIN) for Wi-Fi, operating mode, player lock, travel safety, and sleep timers. |
+| **Catalog Grid** | Clean cover-art grid for the device's assigned profile, with favorites, series grouping, and quick visual source badges. |
+| **Book Detail** | Full cover art, browsable chapter/track list with 16×16 icons, Series view shortcut, and instant Play button. |
+| **Now Playing** | Live playback progress, skip controls, chapter navigation, and volume slider respecting Yoto volume limits. |
+| **Night Clock** | Low-glare bedtime clock with configurable sleep/wake color indicators and burn-in protection. |
+| **Settings Menu** | Hidden 4-digit **Settings PIN** menu for Wi-Fi, operating mode, player lock, brightness, and sleep timers. |
 
 ---
 
-## 🛠️ Hardware Specifications
+## 🛠️ Hardware
 
-Targeted specifically for the **[Waveshare ESP32-S3-Touch-LCD-4.3B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B)** (Rev 1.1):
-
-| Component | Specification |
-| --- | --- |
-| **SoC** | ESP32-S3 (Dual-core Xtensa LX7, 240 MHz) |
-| **Display** | 4.3" 800×480 IPS LCD, 16-bit RGB565 parallel interface |
-| **Touch** | Goodix GT911 capacitive multi-touch (I²C) |
-| **Memory** | 16 MB QIO Flash + 8 MB Octal PSRAM |
-| **I/O Expander** | CH422G (controls LCD/touch reset and backlight PWM) |
-| **Power** | 5V via USB-C (continuous bedside wall power) |
-| **Enclosure** | 3D printable desktop stand or wall-mount case (included in `3d-models/`) |
-
-### Hardware & Driver Engineering Notes
-* **Pixel Clock:** RGB panel is configured for **12 MHz** (`pclk_active_neg = 1`) with expanded 16-line ST7262 vertical porches (`vsync_back_porch = 16`, `vsync_front_porch = 16`) to eliminate PSRAM bus contention and display jitter.
-* **DMA & PSRAM:** Uses single-framebuffer rendering in PSRAM with an internal SRAM bounce buffer (`cfg.dma_burst_size = 64`, `bounce_buffer_size_px = LCD_H_RES * 20`) and a fixed 32-slot LRU PSRAM pool (`THUMB_POOL_SIZE 32`) to eliminate scanline flicker.
-* **Touch Filtering:** Custom GT911 debouncing with hold-state logic between polls prevents touch jitter and accidental chapter selections.
+Built for the **[Waveshare ESP32-S3-Touch-LCD-4.3B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B)** (4.3" `800×480` capacitive touchscreen powered over USB-C). 3D-printable desktop and wall-mount enclosures are included in `3d-models/`.
 
 ---
 
-## 🚀 Getting Started & Installation
+## 🚀 Getting Started (First-Time USB Install)
 
-### Option 1: Flashing Pre-Built Binaries (Releases & Pre-Releases — No Build Tools Required)
+For a brand-new board, complete **Option 1** or **Option 2** over USB-C first. Once StoryDeck Touch is installed and connected to Wi-Fi, all future updates can be installed wirelessly (OTA).
 
-For most users, pre-compiled firmware binaries are provided with every GitHub release and pre-release tag:
+### Option 1: Flash Pre-Built Firmware (No Build Tools Required)
 
-1. **Download Release Assets:**
-   * Go to the [Releases](https://github.com/YotoStoryDeck/StoryDeck-Touch/releases) page.
-   * Download the latest `firmware.bin`, `bootloader.bin`, and `partitions.bin` (or the combined `firmware-merged.bin`).
-2. **Flash to ESP32-S3:**
-   * Use the web-based **[ESP Web Tools](https://esphome.github.io/esp-web-tools/)** in Chrome/Edge, or use `esptool.py`:
-     ```bash
-     esptool.py -p COM_PORT -b 921600 write_flash 0x0 firmware-merged.bin
-     ```
+* Connect the board via USB-C and install directly from Chrome or Edge using the **[StoryDeck Touch Web Flasher](https://yotostorydeck.github.io/StoryDeck-Touch/)**, or download `firmware-merged.bin` from [Releases](https://github.com/YotoStoryDeck/StoryDeck-Touch/releases) and flash with `esptool.py`:
+  ```bash
+  esptool.py -p COM_PORT -b 921600 write_flash 0x0 firmware-merged.bin
+  ```
 
----
-
-### Option 2: Build & Flash from Source via PlatformIO
-
-If developing locally or customizing firmware:
+### Option 2: Build from Source (PlatformIO)
 
 ```bash
-# Clone the repository
 git clone https://github.com/YotoStoryDeck/StoryDeck-Touch.git
-cd touch
-
-# Build firmware for Waveshare ESP32-S3
-pio run -e waveshare-s3-43b
-
-# Flash to device over USB-C
+cd StoryDeck-Touch
 pio run -e waveshare-s3-43b -t upload
 ```
 
 ---
 
-### Option 3: Tablet Kiosk & Browser Companion
+## 📡 Wireless Firmware Updates (OTA — After Initial Install)
 
-To run the Touch UI on a tablet (iPad, Fire HD, Android) or browser without physical ESP32 hardware:
-* The Tablet Kiosk web client is maintained directly in [StoryDeck Core](https://github.com/YotoStoryDeck/StoryDeck-Core) under `static/kiosk/`.
-* Open your tablet browser or full-screen kiosk app to `http://<core-ip>:5055/kiosk/`. All client assets are served natively by StoryDeck Core.
+Once **StoryDeck Touch `v0.1.0+`** has been installed once over USB-C on your **Waveshare ESP32-S3-Touch-LCD-4.3B** and joined to your Wi-Fi network, you can update wirelessly without unplugging the display (your Wi-Fi and Yoto settings are preserved):
+
+* **Without StoryDeck Core (Web Installer or On-Device Settings):**
+  * **From the Web Installer:** Switch to the **Wireless Update (OTA)** tab on the **[StoryDeck Touch Web Flasher](https://yotostorydeck.github.io/StoryDeck-Touch/)**, enter your device IP or `storydeck-touch.local`, click **Send Update to Device**, and enter your 4-digit **Settings PIN** on the confirmation page.
+  * **From the Device Settings Page:** Open `http://storydeck-touch.local/settings` (or `http://<device-ip>/settings`). StoryDeck Touch checks automatically for new releases on boot and once daily; click **Check for Updates** → **Install** (or visit `/update` to upload a downloaded `firmware.bin` manually).
+* **With StoryDeck Core:** Open **Core Admin → Hardware Displays** to push official or custom updates (and 1-click rollbacks) to one or all displays.
+* **Developer CLI (PlatformIO):** `pio run -e waveshare-s3-43b-ota -t upload --upload-port storydeck-touch.local`
+
+> [!NOTE]
+> **Prefer a Tablet Instead of ESP32 Hardware?** If you already have **StoryDeck Core** installed and running, open `http://<core-ip>:5055/kiosk/` on any modern iPad (`iPadOS 14+`), Android tablet, or Fire tablet to use the built-in **Tablet Kiosk** web app (not available in Standalone Mode).
 
 ---
-
-### 📱 On-Device Setup Wizard
-1. Power on the device.
-2. Select your Wi-Fi network and enter the password using the on-screen touchscreen keyboard.
-3. Choose **StoryDeck Core Mode** (the device announces itself and waits for one-click approval in your Core Web Admin) or **Standalone Mode** (scan the on-screen QR code to authenticate with Yoto).
-
----
-
 
 ## 🤖 AI Development Notice
 
-This project utilizes artificial intelligence (AI) tools, including Anthropic Claude and Google Gemini / Antigravity, to assist in user interface design, embedded driver routines, simulator engineering, and technical documentation. All AI-assisted implementations are reviewed, tested, and validated against physical ESP32-S3 hardware displays and local simulation environments.
+This project utilizes artificial intelligence (AI) tools, including Anthropic Claude and Google Gemini / Antigravity, to assist in interface design, embedded drivers, simulation tooling, and documentation. All contributions are reviewed and tested against physical hardware.
 
 ---
 
 ## 📜 Credits & Lineage
 
-StoryDeck Touch builds upon and is deeply indebted to:
-
-* **Jay Heavner** ([@jayheavner](https://github.com/jayheavner)) — Creator of the original [yoto-esp32-controller](https://github.com/jayheavner/yoto-esp32-controller). His pioneering work established the ESP32-S3 display driver optimizations, LVGL UI layout, 3D enclosure designs, and standalone Yoto API integration.
-* **Mylacc** ([@mylacc](https://github.com/mylacc)) — Creator of [yoto-audiobookshelf-bridge](https://github.com/mylacc/yoto-audiobookshelf-bridge), enabling self-hosted audiobook streaming.
+* **Jay Heavner** ([@jayheavner](https://github.com/jayheavner)) — Creator of [yoto-esp32-controller](https://github.com/jayheavner/yoto-esp32-controller).
+* **Mylacc** ([@mylacc](https://github.com/mylacc)) — Creator of [yoto-audiobookshelf-bridge](https://github.com/mylacc/yoto-audiobookshelf-bridge).
 * **LVGL** ([@lvgl](https://github.com/lvgl)) — Light and Versatile Embedded Graphics Library.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
-3D enclosure CAD files and models are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Licensed under the [MIT License](LICENSE). 3D enclosure files are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

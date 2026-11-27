@@ -399,3 +399,28 @@ void build_grid(){
   update_home_bar();
 }
 
+void reload_catalog_and_thumbs(bool refetch_standalone){
+  unbind_grid_tiles();
+  for(size_t i = 0; i < s_cards.size(); i++){
+    s_cards[i].stream_fail_t = 0;
+  }
+  s_pc_cursor = 0;
+  s_pc_pass = 0;
+  s_pc_fail = 0;
+  s_pc_done = false;
+
+  if(cfg::op_mode == "core" && cfg::core_url.length() > 0){
+    fetch_library_core();
+  } else if(refetch_standalone){
+    fetch_library();
+  } else {
+    build_catalog_from_library();
+  }
+
+  core::s_catalog_dirty = false;
+  if(s_scr_home){
+    build_grid();
+    load_thumbs();
+  }
+}
+
