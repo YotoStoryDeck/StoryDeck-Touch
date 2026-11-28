@@ -87,8 +87,8 @@ static char* read_body_psram(HTTPClient& http, size_t& outLen){
 
 
 
-// Add single card from Core catalog (preserving multiple series_list memberships for Kiosk parity; NO LIMIT)
-static void add_core_card(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover = "", const String& s_cover_id = ""){ 
+// Add single card from Core catalog (preserving multiple series_list memberships for Kiosk parity)
+static void _ingest_core_card(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover, const String& s_cover_id, int ingest_cap, bool is_series_only){
   Card c;
   c.id               = id.c_str();
   c.title            = title.c_str();
@@ -103,6 +103,7 @@ static void add_core_card(const String& id, const String& title, const String& a
   c.has_physical     = has_phys;
   c.series_cover     = s_cover.c_str();
   c.series_cover_id  = s_cover_id.c_str();
+  c.series_only      = is_series_only;
   c.extra_series_cnt = 0;
   if(!series_list.isNull() && series_list.size() > 0){
     for(size_t si = 0; si < series_list.size(); si++){
@@ -158,16 +159,55 @@ static void add_core_card(const String& id, const String& title, const String& a
   c.daily        = false;
   c.tile         = nullptr;
   c.pool_slot    = -1;
-  // Temporary ingestion headroom so Yoto cards & highlights are captured before sorting & trimming to catalog_card_limit
-  const int ingest_limit = 240;
-  if(s_card_count < ingest_limit){
+  if(ingest_cap <= 0 || s_card_count < ingest_cap){
     for(const auto& existing : s_cards){
       if(existing.id == c.id) return;
-      if(existing.title.length() > 0 && c.title.length() > 0 && existing.title.equalsIgnoreCase(c.title)) return;
+      if(!is_series_only && existing.title.length() > 0 && c.title.length() > 0 && existing.title.equalsIgnoreCase(c.title)) return;
     }
     s_cards.push_back(c);
     s_card_count = (int)s_cards.size();
   }
+}
+
+static void add_core_card(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover = "", const String& s_cover_id = ""){
+  // Temporary ingestion headroom so Yoto cards & highlights are captured before sorting & trimming to catalog_card_limit
+  _ingest_core_card(id, title, author, cover, src, series, seq, seq_disp, is_hl, series_list, lp, has_phys, s_cover, s_cover_id, 240, false);
+}
+
+static void add_core_series_card(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover = "", const String& s_cover_id = ""){
+  _ingest_core_card(id, title, author, cover, src, series, seq, seq_disp, is_hl, series_list, lp, has_phys, s_cover, s_cover_id, 0, true);
+}
+
+static void add_core_series_group(const String& name, int count, const String& cover, const String& cover_id, const String& src){
+  int rep_idx = -1;
+  if(cover_id.length() > 0){
+    for(int i = 0; i < s_card_count; i++){
+      if(s_cards[i].id.equalsIgnoreCase(cover_id.c_str())){
+        rep_idx = i;
+        break;
+      }
+    }
+    if(rep_idx < 0){
+      Card rep;
+      rep.id         = cover_id.c_str();
+      rep.title      = name.c_str();
+      rep.sort_title = clean_sort_title(name.c_str());
+      rep.cover      = cover.c_str();
+      rep.source     = (src == "abs") ? 1 : 0;
+      rep.series     = name.c_str();
+      rep.series_only = true;
+      rep.pool_slot  = -1;
+      s_cards.push_back(rep);
+      rep_idx = s_card_count;
+      s_card_count = (int)s_cards.size();
+    }
+  }
+  SeriesGroup sg;
+  sg.name = name.c_str();
+  sg.count = count;
+  sg.rep_card_idx = rep_idx;
+  sg.fetched = false;
+  s_series_groups.push_back(sg);
 }
 
 static void sort_catalog_kiosk_order(){
@@ -222,7 +262,18 @@ bool fetch_library_core(){
     if(sc.is_highlight) hl_count++;
   }
   log_msg("[CORE] Catalog loaded: %d cards (%d highlighted) for profile '%s' in %u ms", s_card_count, hl_count, prof_id.c_str(), (unsigned)(millis() - t_cat0));
-  precompute_series_metadata();
+
+  s_series_groups.clear();
+  s_series_group_names.clear();
+  bool got_series = core::fetch_series_index(cfg::core_url, prof_id, add_core_series_group);
+  if(got_series && !s_series_groups.empty()){
+    for(size_t g = 0; g < s_series_groups.size(); g++){
+      s_series_group_names.push_back(s_series_groups[g].name);
+    }
+    log_msg("[CORE] Series index loaded: %d accessible series for '%s'", (int)s_series_groups.size(), prof_id.c_str());
+  } else {
+    precompute_series_metadata();
+  }
 
   sync_active_player_playback();
 

@@ -96,7 +96,6 @@ static void get_card_seq_info(const Card& c, const PsramString& target_grp, floa
 }
 
 
-static std::vector<PsramString, PsramVectorAlloc<PsramString>> s_series_group_names;
 // Precompute series groups, predetermined covers, and sort order once on catalog load
 void precompute_series_metadata(){
   s_series_groups.clear();
@@ -177,6 +176,15 @@ static void series_tile_cb(lv_event_t* e){
   if(g_idx >= 0 && g_idx < (int)s_series_groups.size()){
     s_selected_series_filter = s_series_groups[g_idx].name;
     Serial.printf("[SERIES] Selected series: '%s' (idx %d)\n", s_selected_series_filter.c_str(), g_idx);
+    if(cfg::op_mode == "core" && !s_series_groups[g_idx].fetched){
+      String prof_id = "default";
+      if(core::s_profile_count > 0 && core::s_active_profile_idx >= 0 && core::s_active_profile_idx < core::s_profile_count){
+        prof_id = core::s_profiles[core::s_active_profile_idx].id;
+      }
+      if(core::fetch_series_items(cfg::core_url, prof_id, String(s_selected_series_filter.c_str()), add_core_series_card)){
+        s_series_groups[g_idx].fetched = true;
+      }
+    }
     populate_grid();
     lv_refr_now(lv_disp_get_default());
   }

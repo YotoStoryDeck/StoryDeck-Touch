@@ -213,98 +213,158 @@ inline int player_control(const String& base_url, const String& device_id, const
   return -1;
 }
 
-// 6. Fetch Child Catalog (ABS + Yoto merged via Core hub)
-inline bool fetch_catalog(const String& base_url, const String& child_id,
-  void (*card_cb)(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover, const String& s_cover_id)){
-  if(base_url.length() == 0 || child_id.length() == 0) return false;
-
-  auto fetch_src = [&](const String& path, const String& src_name){
-    WiFiClientSecure scli; WiFiClient pcli; HTTPClient http;
-    if(!http_begin_url(http, scli, pcli, base_url + path)) return;
-    if(s_access_token.length() > 0){
-      http.addHeader("Authorization", String("Bearer ") + s_access_token);
+// URL-encode a query string value for safe GET ?name=... requests
+inline String url_encode_query(const String& s){
+  String out;
+  out.reserve(s.length() + 12);
+  const char hex[] = "0123456789ABCDEF";
+  for(size_t i = 0; i < s.length(); i++){
+    unsigned char c = (unsigned char)s[i];
+    if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~'){
+      out += (char)c;
+    } else if(c == ' '){
+      out += "%20";
+    } else {
+      out += '%';
+      out += hex[(c >> 4) & 0x0F];
+      out += hex[c & 0x0F];
     }
-    http.setTimeout(9000);
-    int code = http.GET();
-    if(code != 200){ http.end(); return; }
-    size_t blen = 0; char* body = read_body(http, blen);
-    http.end();
-    if(!body) return;
-    JsonDocument filter;
-    JsonObject f0 = filter.add<JsonObject>();
-    f0["id"] = true;
-    f0["card_id"] = true;
-    f0["title"] = true;
-    f0["author"] = true;
-    f0["cover"] = true;
-    f0["thumb"] = true;
-    f0["cover_url"] = true;
-    f0["source"] = true;
-    f0["type"] = true;
-    f0["series"] = true;
-    f0["sequence"] = true;
-    f0["sequence_display"] = true;
-    f0["is_highlight"] = true;
-    f0["has_physical"] = true;
-    f0["last_played_at"] = true;
-    f0["lastPlayedAt"] = true;
-    f0["series_list"][0]["name"] = true;
-    f0["series_list"][0]["sequence"] = true;
-    f0["series_list"][0]["sequence_display"] = true;
-    f0["series_cover"] = true;
-    f0["series_cover_id"] = true;
-    PsramAlloc palloc; JsonDocument doc(&palloc);
-    DeserializationError jerr = deserializeJson(doc, (const char*)body, blen, DeserializationOption::Filter(filter));
-    free(body);
-    if(jerr) return;
-    for(JsonObject item : doc.as<JsonArray>()){
-      String id = (const char*)(item["id"] | item["card_id"] | "");
-      if(id.length() == 0) continue;
-      String title = (const char*)(item["title"] | "");
-      String cover = (const char*)(item["cover"] | item["thumb"] | item["cover_url"] | "");
-      if(cover.length() == 0){
-        cover = base_url + "/api/thumb?type=" + src_name + "&id=" + id;
-      } else if(cover.startsWith("/")){
-        cover = base_url + cover;
-      }
-      String author = (const char*)(item["author"] | "");
-      String series = (const char*)(item["series"] | "");
-      JsonArray sl = item["series_list"].as<JsonArray>();
-      if(series.length() == 0 && !sl.isNull() && sl.size() > 0){
-        series = (const char*)(sl[0]["name"] | "");
-      }
-      auto parse_lead_float = [](const String& s) -> float {
-        for(size_t i = 0; i < s.length(); i++){
-          if(s[i] >= '0' && s[i] <= '9'){
-            return s.substring(i).toFloat();
-          }
+  }
+  return out;
+}
+
+typedef void (*CatalogCardCallback)(const String& id, const String& title, const String& author, const String& cover, const String& src, const String& series, float seq, const String& seq_disp, bool is_hl, JsonArray series_list, const String& lp, bool has_phys, const String& s_cover, const String& s_cover_id);
+
+inline bool _fetch_catalog_endpoint(const String& base_url, const String& path, const String& default_src, CatalogCardCallback card_cb){
+  WiFiClientSecure scli; WiFiClient pcli; HTTPClient http;
+  if(!http_begin_url(http, scli, pcli, base_url + path)) return false;
+  if(s_access_token.length() > 0){
+    http.addHeader("Authorization", String("Bearer ") + s_access_token);
+  }
+  http.setTimeout(9000);
+  int code = http.GET();
+  if(code != 200){ http.end(); return false; }
+  size_t blen = 0; char* body = read_body(http, blen);
+  http.end();
+  if(!body) return false;
+  JsonDocument filter;
+  JsonObject f0 = filter.add<JsonObject>();
+  f0["id"] = true;
+  f0["card_id"] = true;
+  f0["title"] = true;
+  f0["author"] = true;
+  f0["cover"] = true;
+  f0["thumb"] = true;
+  f0["cover_url"] = true;
+  f0["source"] = true;
+  f0["type"] = true;
+  f0["series"] = true;
+  f0["sequence"] = true;
+  f0["sequence_display"] = true;
+  f0["is_highlight"] = true;
+  f0["has_physical"] = true;
+  f0["last_played_at"] = true;
+  f0["lastPlayedAt"] = true;
+  f0["series_list"][0]["name"] = true;
+  f0["series_list"][0]["sequence"] = true;
+  f0["series_list"][0]["sequence_display"] = true;
+  f0["series_cover"] = true;
+  f0["series_cover_id"] = true;
+  PsramAlloc palloc; JsonDocument doc(&palloc);
+  DeserializationError jerr = deserializeJson(doc, (const char*)body, blen, DeserializationOption::Filter(filter));
+  free(body);
+  if(jerr) return false;
+  for(JsonObject item : doc.as<JsonArray>()){
+    String id = (const char*)(item["id"] | item["card_id"] | "");
+    if(id.length() == 0) continue;
+    String title = (const char*)(item["title"] | "");
+    String author = (const char*)(item["author"] | "");
+    String series = (const char*)(item["series"] | "");
+    JsonArray sl = item["series_list"].as<JsonArray>();
+    if(series.length() == 0 && !sl.isNull() && sl.size() > 0){
+      series = (const char*)(sl[0]["name"] | "");
+    }
+    auto parse_lead_float = [](const String& s) -> float {
+      for(size_t i = 0; i < s.length(); i++){
+        if(s[i] >= '0' && s[i] <= '9'){
+          return s.substring(i).toFloat();
         }
-        return -1.0f;
-      };
-      float seq = item["sequence"].isNull() ? -1.0f : (float)item["sequence"];
-      String seq_disp = (const char*)(item["sequence_display"] | "");
-      if(seq < 0.0f && seq_disp.length() > 0) seq = parse_lead_float(seq_disp);
-      if(seq < 0.0f && !sl.isNull() && sl.size() > 0){
-        if(!sl[0]["sequence"].isNull()) seq = (float)sl[0]["sequence"];
-        if(seq_disp.length() == 0) seq_disp = (const char*)(sl[0]["sequence_display"] | "");
-        if(seq < 0.0f && seq_disp.length() > 0) seq = parse_lead_float(seq_disp);
       }
-      bool is_hl = (bool)(item["is_highlight"] | false);
-      String item_src = (const char*)(item["source"] | item["type"] | src_name.c_str());
-      if(item_src.startsWith("yoto")) item_src = "yoto";
-      else if(item_src == "abs") item_src = "abs";
-      else item_src = src_name;
-      String lp = (const char*)(item["last_played_at"] | item["lastPlayedAt"] | "");
-      bool has_phys = (bool)(item["has_physical"] | false);
-      String s_cover = (const char*)(item["series_cover"] | "");
-      String s_cover_id = (const char*)(item["series_cover_id"] | "");
-      card_cb(id, title, author, cover, item_src, series, seq, seq_disp, is_hl, sl, lp, has_phys, s_cover, s_cover_id);
+      return -1.0f;
+    };
+    float seq = item["sequence"].isNull() ? -1.0f : (float)item["sequence"];
+    String seq_disp = (const char*)(item["sequence_display"] | "");
+    if(seq < 0.0f && seq_disp.length() > 0) seq = parse_lead_float(seq_disp);
+    if(seq < 0.0f && !sl.isNull() && sl.size() > 0){
+      if(!sl[0]["sequence"].isNull()) seq = (float)sl[0]["sequence"];
+      if(seq_disp.length() == 0) seq_disp = (const char*)(sl[0]["sequence_display"] | "");
+      if(seq < 0.0f && seq_disp.length() > 0) seq = parse_lead_float(seq_disp);
     }
-  };
-
-  fetch_src("/api/kids/" + child_id + "/abs", "abs");
-  fetch_src("/api/kids/" + child_id + "/yoto", "yoto");
+    bool is_hl = (bool)(item["is_highlight"] | false);
+    String item_src = (const char*)(item["source"] | item["type"] | default_src.c_str());
+    if(item_src.startsWith("yoto")) item_src = "yoto";
+    else if(item_src == "abs") item_src = "abs";
+    else item_src = default_src;
+    String cover = (const char*)(item["cover"] | item["thumb"] | item["cover_url"] | "");
+    if(cover.length() == 0){
+      cover = base_url + "/api/thumb?type=" + item_src + "&id=" + id;
+    } else if(cover.startsWith("/")){
+      cover = base_url + cover;
+    }
+    String lp = (const char*)(item["last_played_at"] | item["lastPlayedAt"] | "");
+    bool has_phys = (bool)(item["has_physical"] | false);
+    String s_cover = (const char*)(item["series_cover"] | "");
+    String s_cover_id = (const char*)(item["series_cover_id"] | "");
+    card_cb(id, title, author, cover, item_src, series, seq, seq_disp, is_hl, sl, lp, has_phys, s_cover, s_cover_id);
+  }
   return true;
+}
+
+// 6. Fetch Child Catalog (ABS + Yoto merged via Core hub)
+inline bool fetch_catalog(const String& base_url, const String& child_id, CatalogCardCallback card_cb){
+  if(base_url.length() == 0 || child_id.length() == 0) return false;
+  bool ok_a = _fetch_catalog_endpoint(base_url, "/api/kids/" + child_id + "/abs", "abs", card_cb);
+  bool ok_y = _fetch_catalog_endpoint(base_url, "/api/kids/" + child_id + "/yoto", "yoto", card_cb);
+  return (ok_a || ok_y);
+}
+
+// 6b. Fetch Full Series Index for a Profile (all accessible series regardless of 60-card rotation cap)
+inline bool fetch_series_index(const String& base_url, const String& child_id,
+  void (*series_cb)(const String& name, int count, const String& cover, const String& cover_id, const String& src)){
+  if(base_url.length() == 0 || child_id.length() == 0) return false;
+  WiFiClientSecure scli; WiFiClient pcli; HTTPClient http;
+  if(!http_begin_url(http, scli, pcli, base_url + "/api/kids/" + child_id + "/series")) return false;
+  if(s_access_token.length() > 0){
+    http.addHeader("Authorization", String("Bearer ") + s_access_token);
+  }
+  http.setTimeout(9000);
+  int code = http.GET();
+  if(code != 200){ http.end(); return false; }
+  size_t blen = 0; char* body = read_body(http, blen);
+  http.end();
+  if(!body) return false;
+  PsramAlloc palloc; JsonDocument doc(&palloc);
+  DeserializationError jerr = deserializeJson(doc, (const char*)body, blen);
+  free(body);
+  if(jerr || !doc.is<JsonArray>()) return false;
+  for(JsonObject s : doc.as<JsonArray>()){
+    String name = (const char*)(s["name"] | "");
+    if(name.length() == 0) continue;
+    int count = (int)(s["count"] | 0);
+    String cover_id = (const char*)(s["cover_id"] | "");
+    String src = (const char*)(s["source"] | "yoto");
+    String cover = (const char*)(s["cover"] | "");
+    if(cover.startsWith("/")) cover = base_url + cover;
+    series_cb(name, count, cover, cover_id, src);
+  }
+  return true;
+}
+
+// 6c. Lazy-Fetch all books in a single Series for Level 2 view
+inline bool fetch_series_items(const String& base_url, const String& child_id, const String& series_name, CatalogCardCallback card_cb){
+  if(base_url.length() == 0 || child_id.length() == 0 || series_name.length() == 0) return false;
+  String path = "/api/kids/" + child_id + "/series/items?name=" + url_encode_query(series_name);
+  return _fetch_catalog_endpoint(base_url, path, "yoto", card_cb);
 }
 
 // 7. Fetch Media Tracks / Chapters via Core Hub

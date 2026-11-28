@@ -186,6 +186,7 @@ struct Card {
   bool        is_highlight = false;        // highlighted / pinned card
   bool        has_physical = false;        // physically owned card
   bool        daily = false;               // synthetic "Yoto Daily" tile
+  bool        series_only = false;         // fetched only for full Series tab / cover rep
   lv_obj_t*   tile = nullptr;              // the lv_img tile in the grid
   int         pool_slot = -1;              // Index into s_thumb_pool (-1 = lightweight placeholder)
   uint32_t    stream_fail_t = 0;           // Cooldown timestamp on download failure
@@ -226,8 +227,10 @@ struct SeriesGroup {
   PsramString name;
   int         rep_card_idx = -1;
   int         count = 0;
+  bool        fetched = false;
 };
 static std::vector<SeriesGroup, PsramVectorAlloc<SeriesGroup>> s_series_groups;
+static std::vector<PsramString, PsramVectorAlloc<PsramString>> s_series_group_names;
 
 inline void unbind_grid_tiles(){
   for(size_t i = 0; i < s_cards.size(); i++){

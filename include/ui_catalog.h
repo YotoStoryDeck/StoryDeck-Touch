@@ -45,6 +45,7 @@ static bool is_played_past_7_days(const PsramString& lp){
 }
 
 static bool card_matches_active_tab(const Card& c){
+  if(c.series_only && s_active_tab != TAB_SERIES) return false;
   if(s_active_tab == TAB_ALL) return true;
   if(s_active_tab == TAB_SERIES) return (c.series.length() > 0);
   if(s_active_tab == TAB_RECENT){
