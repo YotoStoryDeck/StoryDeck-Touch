@@ -218,10 +218,13 @@ bool load_thumb_for_card(int card_idx, bool force_refr){
 
 void update_visible_thumbs(bool force_refr){
   if(!s_grid) return;
+  int loaded_pass = 0;
   for(int i = 0; i < s_card_count; i++){
     if(s_cards[i].tile && is_tile_visible(s_cards[i].tile)){
       if(s_cards[i].pool_slot < 0){
+        if(!force_refr && loaded_pass >= 2) continue;
         if(load_thumb_for_card(i, force_refr)){
+          loaded_pass++;
           vTaskDelay(pdMS_TO_TICKS(10));
         }
       } else {

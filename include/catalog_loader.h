@@ -158,8 +158,9 @@ static void add_core_card(const String& id, const String& title, const String& a
   c.daily        = false;
   c.tile         = nullptr;
   c.pool_slot    = -1;
-  int limit = (cfg::catalog_card_limit > 0 ? cfg::catalog_card_limit : 60) + 1;
-  if(s_card_count < limit){
+  // Temporary ingestion headroom so Yoto cards & highlights are captured before sorting & trimming to catalog_card_limit
+  const int ingest_limit = 240;
+  if(s_card_count < ingest_limit){
     for(const auto& existing : s_cards){
       if(existing.id == c.id) return;
       if(existing.title.length() > 0 && c.title.length() > 0 && existing.title.equalsIgnoreCase(c.title)) return;
@@ -210,9 +211,17 @@ bool fetch_library_core(){
 
   }
 
-  log_msg("[CORE] Catalog loaded: %d cards for profile '%s' in %u ms", s_card_count, prof_id.c_str(), (unsigned)(millis() - t_cat0));
-
   sort_catalog_kiosk_order();
+  int limit = (cfg::catalog_card_limit > 0 ? cfg::catalog_card_limit : 60) + 1;
+  if((int)s_cards.size() > limit){
+    s_cards.resize(limit);
+    s_card_count = (int)s_cards.size();
+  }
+  int hl_count = 0;
+  for(const auto& sc : s_cards){
+    if(sc.is_highlight) hl_count++;
+  }
+  log_msg("[CORE] Catalog loaded: %d cards (%d highlighted) for profile '%s' in %u ms", s_card_count, hl_count, prof_id.c_str(), (unsigned)(millis() - t_cat0));
   precompute_series_metadata();
 
   sync_active_player_playback();
